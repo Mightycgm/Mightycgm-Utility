@@ -9,6 +9,7 @@ const tools = [
   { name: 'Color Picker', href: '/color-picker', emoji: '🎨' },
   { name: 'Background Remover', href: '/background-remover', emoji: '✂️' },
   { name: 'PDF Tools', href: '/pdf-tools', emoji: '📄' },
+  { name: 'URL Shortener', href: '/url-shortener', emoji: '🔗' },
   { name: 'Text Share', href: '/text-share', emoji: '📝' },
   { name: 'Log Share', href: '/log-share', emoji: '📋' },
   { name: 'Image Tools', href: '/image-tools', emoji: '🖼️' },

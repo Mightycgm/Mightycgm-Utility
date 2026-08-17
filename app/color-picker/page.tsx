@@ -200,8 +200,6 @@ export default function ColorPickerPage() {
                   gradient={`linear-gradient(to right, rgba(${rgb.r}, 0, ${rgb.b}, 1), rgba(${rgb.r}, 255, ${rgb.b}, 1))`} />
                 <ColorSlider label="Blue (B)" value={rgb.b} max={255} setter={(v: number) => handleRgbChange('b', v)}
                   gradient={`linear-gradient(to right, rgba(${rgb.r}, ${rgb.g}, 0, 1), rgba(${rgb.r}, ${rgb.g}, 255, 1))`} />
-                <ColorSlider label="Alpha (A)" value={hsla.a} max={1} isAlpha={true} setter={(v: number) => setHsla({...hsla, a: v})}
-                  gradient={`linear-gradient(to right, rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0), rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 1))`} />
               </div>
             )}
 
@@ -213,8 +211,6 @@ export default function ColorPickerPage() {
                   gradient={`linear-gradient(to right, hsl(${hsla.h}, 0%, ${hsla.l}%), hsl(${hsla.h}, 100%, ${hsla.l}%))`} />
                 <ColorSlider label="Lightness (L)" value={hsla.l} max={100} setter={(v: number) => setHsla({...hsla, l: v})}
                   gradient={`linear-gradient(to right, #000, hsl(${hsla.h}, ${hsla.s}%, 50%), #fff)`} />
-                <ColorSlider label="Alpha (A)" value={hsla.a} max={1} isAlpha={true} setter={(v: number) => setHsla({...hsla, a: v})}
-                  gradient={`linear-gradient(to right, hsla(${hsla.h}, ${hsla.s}%, ${hsla.l}%, 0), hsla(${hsla.h}, ${hsla.s}%, ${hsla.l}%, 1))`} />
               </div>
             )}
           </div>

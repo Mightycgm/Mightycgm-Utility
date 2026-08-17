@@ -24,8 +24,9 @@ const toolCategories = [
     ],
   },
   {
-    category: 'Sharing',
+    category: 'Sharing & Links',
     tools: [
+      { name: 'URL Shortener', description: 'Create short, shareable links', href: '/url-shortener', emoji: '🔗' },
       { name: 'Text Share', description: 'Share long text via short link', href: '/text-share', emoji: '📝' },
       { name: 'Log Share', description: 'Share logs with syntax highlight', href: '/log-share', emoji: '📋' },
     ],
