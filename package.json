@@ -1,0 +1,52 @@
+{
+  "name": "mightycgm-utility",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build --webpack && next-sitemap",
+    "start": "next start",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "@imgly/background-removal": "^1.7.0",
+    "@tailwindcss/typography": "^0.5.20",
+    "@types/crypto-js": "^4.2.2",
+    "axios": "^1.19.0",
+    "browser-image-compression": "^2.0.2",
+    "crypto-js": "^4.1.1",
+    "diff": "^9.0.0",
+    "framer-motion": "^13.1.0",
+    "jose": "^6.2.9",
+    "jsqr": "^1.4.0",
+    "lucide-react": "^1.31.0",
+    "nanoid": "^6.0.1",
+    "next": "16.3.1",
+    "next-sitemap": "^4.2.3",
+    "onnxruntime-web": "^1.27.0",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108",
+    "prism-react-renderer": "^2.4.1",
+    "prismjs": "^1.30.0",
+    "qrcode": "^1.5.4",
+    "react": "19.2.8",
+    "react-colorful": "^5.8.0",
+    "react-dom": "19.2.8",
+    "react-dropzone": "^20.1.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "remark-gfm": "^4.0.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.3.1",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
