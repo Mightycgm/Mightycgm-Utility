@@ -166,8 +166,7 @@ export default function ColorPickerPage() {
           </div>
 
           <div 
-            className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)] relative overflow-hidden" 
-            style={{ background: 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 / 20px 20px' }}
+            className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)] relative overflow-hidden bg-white dark:bg-gray-100" 
           >
             <div className="absolute inset-0" style={{ background: `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})` }} />
           </div>
