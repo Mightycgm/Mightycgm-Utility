@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 import axios from 'axios';
 import { Highlight, themes } from 'prism-react-renderer';
@@ -33,7 +33,12 @@ export default function LogSharePage() {
     try {
       const payload = { title: title || 'Log Share', code, language, createdAt: new Date().toISOString() };
       const res = await axios.post(JSONBIN_URL, payload, {
-        headers: { 'X-Master-Key': apiKey, 'X-Bin-Name': title || 'log-share', 'Content-Type': 'application/json' },
+        headers: { 
+          'X-Master-Key': apiKey, 
+          'X-Bin-Name': title || 'log-share', 
+          'Content-Type': 'application/json',
+          'X-Bin-Private': 'false'
+        },
       });
       const binId = res.data.metadata.id;
       setShareUrl(`${window.location.origin}${window.location.pathname}?id=${binId}`);
@@ -41,17 +46,27 @@ export default function LogSharePage() {
     setLoading(false);
   };
 
-  const retrieve = async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) { setError('No JSONBin API key. Go to Settings.'); return; }
+  const retrieve = async (idToFetch?: string) => {
+    const id = idToFetch || (retrieveId.includes('?id=') ? retrieveId.split('?id=')[1] : retrieveId.trim());
+    if (!id) return;
+    
     setRetrieving(true); setError('');
-    const id = retrieveId.includes('?id=') ? retrieveId.split('?id=')[1] : retrieveId.trim();
     try {
-      const res = await axios.get(`${JSONBIN_URL}/${id}/latest`, { headers: { 'X-Master-Key': apiKey } });
+      const res = await axios.get(`${JSONBIN_URL}/${id}/latest`);
       setRetrieved(res.data.record);
-    } catch { setError('Could not retrieve. Check ID or API key.'); }
+    } catch { setError('Could not retrieve. Link might be invalid or deleted.'); }
     setRetrieving(false);
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    if (id) {
+      setTab('view');
+      setRetrieveId(id);
+      retrieve(id);
+    }
+  }, []);
 
   const copy = (t: string) => { navigator.clipboard.writeText(t); setCopied(true); setTimeout(() => setCopied(false), 1500); };
 

@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 import axios from 'axios';
 import { nanoid } from 'nanoid';
@@ -37,7 +37,12 @@ export default function TextSharePage() {
     try {
       const payload = { title: title || 'Untitled', text, createdAt: new Date().toISOString() };
       const res = await axios.post(JSONBIN_URL, payload, {
-        headers: { 'X-Master-Key': apiKey, 'X-Bin-Name': title || 'text-share', 'Content-Type': 'application/json' },
+        headers: { 
+          'X-Master-Key': apiKey, 
+          'X-Bin-Name': title || 'text-share', 
+          'Content-Type': 'application/json',
+          'X-Bin-Private': 'false'
+        },
       });
       const binId = res.data.metadata.id;
       const url = `${window.location.origin}${window.location.pathname}?id=${binId}`;
@@ -49,23 +54,31 @@ export default function TextSharePage() {
     setLoading(false);
   };
 
-  const retrieve = async () => {
-    if (!retrieveId.trim()) return;
-    const apiKey = getApiKey();
-    if (!apiKey) { setError('No JSONBin API key set. Go to Settings.'); return; }
+  const retrieve = async (idToFetch?: string) => {
+    const id = idToFetch || (retrieveId.includes('?id=') ? retrieveId.split('?id=')[1] : retrieveId.trim());
+    if (!id) return;
+    
     setRetrieving(true); setError('');
-    // Extract bin ID from URL or raw ID
-    const id = retrieveId.includes('?id=') ? retrieveId.split('?id=')[1] : retrieveId.trim();
     try {
-      const res = await axios.get(`${JSONBIN_URL}/${id}/latest`, {
-        headers: { 'X-Master-Key': apiKey },
-      });
+      // Public read, no API key required
+      const res = await axios.get(`${JSONBIN_URL}/${id}/latest`);
       setRetrieved(res.data.record);
     } catch (e) {
-      setError('Could not retrieve. Check the ID or your API key.');
+      setError('Could not retrieve text. The link might be invalid or deleted.');
     }
     setRetrieving(false);
   };
+
+  // Auto-fetch if ID is in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get('id');
+    if (id) {
+      setTab('retrieve');
+      setRetrieveId(id);
+      retrieve(id);
+    }
+  }, []);
 
   const copy = (text: string) => {
     navigator.clipboard.writeText(text);
