@@ -71,9 +71,10 @@ export default function HomePage() {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {cat.tools.map(tool => (
-                <Link 
+                <Link prefetch={false} 
                   key={tool.href} 
                   href={tool.href} 
+                  prefetch={false}
                   className="tool-card p-5 flex flex-col gap-3 group"
                 >
                   <div className="w-10 h-10 rounded-md bg-[var(--muted)] flex items-center justify-center text-xl">

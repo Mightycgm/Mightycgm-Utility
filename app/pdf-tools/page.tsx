@@ -1,7 +1,6 @@
 'use client';
 import { useState, useCallback } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import { PDFDocument } from 'pdf-lib';
 
 type Tab = 'merge' | 'split' | 'to-image' | 'img-to-pdf';
 
@@ -38,6 +37,7 @@ export default function PdfToolsPage() {
     if (mergeFiles.length < 2) return;
     setMerging(true);
     try {
+      const { PDFDocument } = await import('pdf-lib');
       const merged = await PDFDocument.create();
       for (const file of mergeFiles) {
         const bytes = await file.arrayBuffer();
@@ -56,6 +56,7 @@ export default function PdfToolsPage() {
   const loadSplitFile = async (file: File) => {
     setSplitFile(file); setSplitResult('');
     try {
+      const { PDFDocument } = await import('pdf-lib');
       const bytes = await file.arrayBuffer();
       const doc = await PDFDocument.load(bytes);
       setSplitTotal(doc.getPageCount());
@@ -68,6 +69,7 @@ export default function PdfToolsPage() {
     if (!splitFile) return;
     setSplitting(true);
     try {
+      const { PDFDocument } = await import('pdf-lib');
       const bytes = await splitFile.arrayBuffer();
       const src = await PDFDocument.load(bytes);
       const out = await PDFDocument.create();
@@ -111,6 +113,7 @@ export default function PdfToolsPage() {
     if (imgFiles.length === 0) return;
     setBuildingPdf(true);
     try {
+      const { PDFDocument } = await import('pdf-lib');
       const pdf = await PDFDocument.create();
       for (const file of imgFiles) {
         const bytes = await file.arrayBuffer();

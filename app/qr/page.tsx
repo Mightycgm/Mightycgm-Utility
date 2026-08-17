@@ -1,8 +1,8 @@
-﻿'use client';
+'use client';
 import { useState, useRef, useCallback } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import jsQR from 'jsqr';
-import QRCode from 'qrcode';
+
+
 
 type Tab = 'decode' | 'generate';
 
@@ -21,6 +21,7 @@ export default function QRPage() {
   const generateQR = async () => {
     if (!genText.trim()) return;
     try {
+      const { default: QRCode } = await import('qrcode');
       const url = await QRCode.toDataURL(genText, { width: genSize, margin: 2, color: { dark: '#ffffff', light: '#111827' } });
       setGenQR(url);
     } catch (e) { console.error(e); }
@@ -31,13 +32,14 @@ export default function QRPage() {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
-      img.onload = () => {
+      img.onload = async () => {
         const canvas = document.createElement('canvas');
         canvas.width = img.width; canvas.height = img.height;
         const ctx = canvas.getContext('2d')!;
         ctx.drawImage(img, 0, 0);
         const data = ctx.getImageData(0, 0, img.width, img.height);
-        const code = jsQR(data.data, data.width, data.height);
+        const { default: jsQR } = await import('jsqr');
+          const code = jsQR(data.data, data.width, data.height);
         if (code) setDecResult(code.data);
         else setDecError('No QR code found in the image.');
       };
@@ -53,7 +55,7 @@ export default function QRPage() {
   };
 
   return (
-    <ToolPageWrapper title="QR Code Suite" description="Generate & decode QR codes instantly" emoji="📷">
+    <ToolPageWrapper title="QR Code Suite" description="Generate & decode QR codes instantly" emoji="??">
       {/* Tabs */}
       <div className="flex gap-2 mb-8">
         {(['generate', 'decode'] as Tab[]).map(t => (
@@ -89,7 +91,7 @@ export default function QRPage() {
             {genQR ? (
               <div className="space-y-4 text-center">
                 <img src={genQR} alt="QR Code" className="rounded-2xl mx-auto" style={{ width: Math.min(genSize, 280), height: Math.min(genSize, 280) }} />
-                <a href={genQR} download="qrcode.png" className="btn-secondary inline-block px-6">⬇ Download PNG</a>
+                <a href={genQR} download="qrcode.png" className="btn-secondary inline-block px-6">? Download PNG</a>
               </div>
             ) : (
               <div className="w-full h-64 border-2 border-dashed border-gray-700 rounded-2xl flex items-center justify-center text-gray-600">
@@ -111,7 +113,7 @@ export default function QRPage() {
             onDrop={handleDrop}
             onClick={() => fileRef.current?.click()}
           >
-            <div className="text-5xl mb-3">📷</div>
+            <div className="text-5xl mb-3">??</div>
             <p className="text-gray-400 font-medium">Drop QR image here or click to upload</p>
             <p className="text-gray-600 text-sm mt-1">PNG, JPG, WebP supported</p>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
@@ -120,12 +122,12 @@ export default function QRPage() {
           {decResult && (
             <div className="tool-card p-5 space-y-3">
               <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-green-400">✅ Decoded Successfully</h3>
+                <h3 className="font-semibold text-green-400">? Decoded Successfully</h3>
                 <button className="btn-secondary text-xs px-3 py-1" onClick={() => navigator.clipboard.writeText(decResult)}>Copy</button>
               </div>
               <p className="text-sm font-mono bg-gray-800 p-3 rounded-lg break-all text-gray-300">{decResult}</p>
               {decResult.startsWith('http') && (
-                <a href={decResult} target="_blank" rel="noopener noreferrer" className="text-indigo-400 text-sm hover:underline">🔗 Open Link →</a>
+                <a href={decResult} target="_blank" rel="noopener noreferrer" className="text-indigo-400 text-sm hover:underline">?? Open Link ?</a>
               )}
             </div>
           )}

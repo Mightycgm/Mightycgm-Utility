@@ -1,7 +1,7 @@
-﻿'use client';
+'use client';
 import { useState, useCallback } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import imageCompression from 'browser-image-compression';
+
 
 type Tab = 'compress' | 'convert';
 
@@ -72,7 +72,7 @@ export default function ImageToolsPage() {
   const fmtSize = (b: number) => b > 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(2)} MB` : `${(b / 1024).toFixed(1)} KB`;
 
   return (
-    <ToolPageWrapper title="Image Tools" description="Compress & convert images in your browser" emoji="🖼️">
+    <ToolPageWrapper title="Image Tools" description="Compress & convert images in your browser" emoji="???">
       <div className="flex gap-2 mb-8">
         {(['compress', 'convert'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
@@ -86,7 +86,7 @@ export default function ImageToolsPage() {
             className="border-2 border-dashed border-gray-700 rounded-2xl p-10 text-center cursor-pointer hover:border-gray-600 transition-all"
             onClick={() => document.getElementById('comp-input')?.click()}
           >
-            <div className="text-4xl mb-2">🖼️</div>
+            <div className="text-4xl mb-2">???</div>
             {origFile ? <p className="text-gray-300">{origFile.name} ({fmtSize(origSize)})</p> : <p className="text-gray-500">Click or drop image to compress</p>}
             <input id="comp-input" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleCompressUpload(f); }} />
           </div>
@@ -116,7 +116,7 @@ export default function ImageToolsPage() {
                       <span className="text-gray-400">Saved:</span>
                       <span className="text-indigo-400">{Math.round((1 - compSize / origSize) * 100)}%</span>
                     </div>
-                    <a href={compressedUrl} download="compressed.jpg" className="btn-primary w-full text-center block mt-2 text-sm">⬇ Download</a>
+                    <a href={compressedUrl} download="compressed.jpg" className="btn-primary w-full text-center block mt-2 text-sm">? Download</a>
                   </div>
                 )}
               </div>
@@ -132,7 +132,7 @@ export default function ImageToolsPage() {
             className="border-2 border-dashed border-gray-700 rounded-2xl p-10 text-center cursor-pointer hover:border-gray-600"
             onClick={() => document.getElementById('conv-input')?.click()}
           >
-            <div className="text-4xl mb-2">🔄</div>
+            <div className="text-4xl mb-2">??</div>
             {convertFile ? <p className="text-gray-300">{convertFile.name}</p> : <p className="text-gray-500">Click to upload image to convert</p>}
             <input id="conv-input" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleConvertUpload(f); }} />
           </div>
@@ -148,7 +148,7 @@ export default function ImageToolsPage() {
               </div>
               <button className="btn-primary px-8" onClick={convert}>Convert</button>
               {convertedUrl && (
-                <a href={convertedUrl} download={`converted.${targetFormat.split('/')[1]}`} className="btn-secondary px-8">⬇ Download</a>
+                <a href={convertedUrl} download={`converted.${targetFormat.split('/')[1]}`} className="btn-secondary px-8">? Download</a>
               )}
             </div>
           )}

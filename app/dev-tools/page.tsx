@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import CryptoJS from 'crypto-js';
+
 
 type Tab = 'base64' | 'url' | 'hash' | 'jwt' | 'uuid' | 'regex';
 
@@ -52,13 +52,13 @@ export default function DevToolsPage() {
     } catch { setUrlOutput('Error: Invalid input'); }
   };
 
-  const handleHash = () => {
+  const handleHash = async () => {
     if (!hashInput) return;
     setHashResults({
-      MD5: CryptoJS.MD5(hashInput).toString(),
-      'SHA-1': CryptoJS.SHA1(hashInput).toString(),
-      'SHA-256': CryptoJS.SHA256(hashInput).toString(),
-      'SHA-512': CryptoJS.SHA512(hashInput).toString(),
+      MD5: (await import('crypto-js')).default.MD5(hashInput).toString(),
+      'SHA-1': (await import('crypto-js')).default.SHA1(hashInput).toString(),
+      'SHA-256': (await import('crypto-js')).default.SHA256(hashInput).toString(),
+      'SHA-512': (await import('crypto-js')).default.SHA512(hashInput).toString(),
     });
   };
 
