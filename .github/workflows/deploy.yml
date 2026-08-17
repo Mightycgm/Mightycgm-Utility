@@ -1,52 +1,43 @@
-name: Deploy to GitHub Pages
+name: Deploy Next.js site to Pages
 
 on:
   push:
-    branches: [main]
+    branches: ["main"]
   workflow_dispatch:
 
-# Required permissions for GitHub Pages deployment
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Allow only one concurrent deployment
 concurrency:
   group: "pages"
   cancel-in-progress: false
 
 jobs:
-  # ── Build job ─────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-
+          cache: npm
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+        with:
+          static_site_generator: next
       - name: Install dependencies
         run: npm ci
-
-      - name: Build Next.js static export
+      - name: Build with Next.js
         run: npm run build
-        env:
-          NODE_ENV: production
-
-      - name: Add .nojekyll (prevent Jekyll processing)
-        run: touch ./out/.nojekyll
-
-      - name: Upload Pages artifact
+      - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./out
 
-  # ── Deploy job ────────────────────────────────────────────
   deploy:
     environment:
       name: github-pages

@@ -1,5 +1,6 @@
-﻿import type { Metadata } from 'next';
+import type { Metadata } from 'next';
 import './globals.css';
+import Sidebar from '@/components/layout/Sidebar';
 
 export const metadata: Metadata = {
   title: {
@@ -64,7 +65,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
       </head>
-      <body className="antialiased">{children}</body>
+      <body className="antialiased flex h-screen overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+        <Sidebar />
+        <main className="flex-1 h-screen overflow-y-auto relative">
+          {children}
+        </main>
+      </body>
     </html>
   );
 }
