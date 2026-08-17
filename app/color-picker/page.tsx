@@ -1,16 +1,24 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import { HexColorPicker, HslaStringColorPicker, RgbaStringColorPicker } from 'react-colorful';
+import { RgbColorPicker, HslColorPicker } from 'react-colorful';
 
-type PickerType = 'hex' | 'rgb' | 'hsl' | 'disk' | 'slider' | 'material' | 'compact';
+type PickerType = 'rgb' | 'hsl' | 'compact';
 type CopyFormat = 'hex' | 'rgb' | 'hsl' | 'cmyk' | 'hsv';
 
+// --- Conversions (Single Source of Truth is HEX or RGB) ---
 function hexToRgb(hex: string) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
+  const r = parseInt(hex.slice(1, 3), 16) || 0;
+  const g = parseInt(hex.slice(3, 5), 16) || 0;
+  const b = parseInt(hex.slice(5, 7), 16) || 0;
   return { r, g, b };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return '#' + [r, g, b].map(x => {
+    const hex = Math.round(x).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  }).join('');
 }
 
 function rgbToHsl(r: number, g: number, b: number) {
@@ -27,6 +35,14 @@ function rgbToHsl(r: number, g: number, b: number) {
     }
   }
   return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+}
+
+function hslToRgb(h: number, s: number, l: number) {
+  s /= 100; l /= 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return { r: Math.round(255 * f(0)), g: Math.round(255 * f(8)), b: Math.round(255 * f(4)) };
 }
 
 function rgbToCmyk(r: number, g: number, b: number) {
@@ -58,12 +74,9 @@ function rgbToHsv(r: number, g: number, b: number) {
 }
 
 const PICKER_TYPES: { key: PickerType; label: string; desc: string }[] = [
-  { key: 'hex', label: 'Corel / Disk', desc: 'Circular hue wheel' },
-  { key: 'rgb', label: 'RGB Sliders', desc: 'Red, Green, Blue channels' },
+  { key: 'rgb', label: 'RGB Picker + Slider', desc: 'Red, Green, Blue channels' },
   { key: 'hsl', label: 'HSL Picker', desc: 'Hue, Saturation, Lightness' },
-  { key: 'slider', label: 'Lucid Slider', desc: 'Precision slider input' },
-  { key: 'material', label: 'Material / Dino', desc: 'Flat color grid' },
-  { key: 'compact', label: 'Atom / Shop', desc: 'Compact swatch picker' },
+  { key: 'compact', label: 'Compact Native', desc: 'System native swatch picker' },
 ];
 
 const MATERIAL_COLORS = [
@@ -74,31 +87,31 @@ const MATERIAL_COLORS = [
 ];
 
 export default function ColorPickerPage() {
-  const [color, setColor] = useState('#6366f1');
-  const [pickerType, setPickerType] = useState<PickerType>('hex');
-  const [rgbaStr, setRgbaStr] = useState('rgba(99, 102, 241, 1)');
-  const [hslaStr, setHslaStr] = useState('hsla(239, 84%, 67%, 1)');
+  // Single source of truth is RGB object for smooth slider dragging
+  const [rgb, setRgb] = useState({ r: 99, g: 102, b: 241 });
+  const [pickerType, setPickerType] = useState<PickerType>('rgb');
   const [copied, setCopied] = useState('');
 
-  // Sliders state
-  const rgb = hexToRgb(color.startsWith('#') ? color : '#6366f1');
+  // Derived states
+  const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
   const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
   const cmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b);
   const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
 
-  const [rVal, setRVal] = useState(rgb.r);
-  const [gVal, setGVal] = useState(rgb.g);
-  const [bVal, setBVal] = useState(rgb.b);
+  const handleHexChange = (newHex: string) => {
+    if (/^#[0-9A-Fa-f]{6}$/.test(newHex)) {
+      setRgb(hexToRgb(newHex));
+    }
+  };
 
-  const applyRGB = () => {
-    const hex = '#' + [rVal, gVal, bVal].map(v => v.toString(16).padStart(2, '0')).join('');
-    setColor(hex);
+  const handleHslChange = (newHsl: { h: number, s: number, l: number }) => {
+    setRgb(hslToRgb(newHsl.h, newHsl.s, newHsl.l));
   };
 
   const copyFormat = (fmt: CopyFormat) => {
     let text = '';
     switch (fmt) {
-      case 'hex': text = color; break;
+      case 'hex': text = hex.toUpperCase(); break;
       case 'rgb': text = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`; break;
       case 'hsl': text = `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`; break;
       case 'cmyk': text = `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`; break;
@@ -110,91 +123,147 @@ export default function ColorPickerPage() {
   };
 
   return (
-    <ToolPageWrapper title="Color Picker" description="7 picker types + HEX/RGB/HSL/CMYK/HSV converter" emoji="🎨">
-      <div className="grid lg:grid-cols-3 gap-8">
-        {/* Picker type selector */}
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Picker Type</h3>
-          {PICKER_TYPES.map(pt => (
-            <button key={pt.key} onClick={() => setPickerType(pt.key)}
-              className={`w-full text-left p-3 rounded-xl transition-all ${pickerType === pt.key ? 'bg-indigo-900/50 border border-indigo-500' : 'tool-card hover:border-gray-600'}`}>
-              <div className="text-sm font-medium text-white">{pt.label}</div>
-              <div className="text-xs text-gray-500">{pt.desc}</div>
-            </button>
-          ))}
+    <ToolPageWrapper title="Color Picker" description="RGB/HSL Pickers + Value Converter" emoji="🎨">
+      <div className="grid lg:grid-cols-3 gap-8 mb-8">
+        {/* Left Column: Picker Selection & Visual Preview */}
+        <div className="space-y-6">
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Picker Type</h3>
+            {PICKER_TYPES.map(pt => (
+              <button key={pt.key} onClick={() => setPickerType(pt.key)}
+                className={`w-full text-left p-3 rounded-xl transition-all ${pickerType === pt.key ? 'bg-[var(--foreground)] text-[var(--background)]' : 'tool-card'}`}>
+                <div className="text-sm font-medium">{pt.label}</div>
+                <div className={`text-xs ${pickerType === pt.key ? 'opacity-80' : 'text-[var(--muted-text)]'}`}>{pt.desc}</div>
+              </button>
+            ))}
+          </div>
+
+          <div className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)]" style={{ background: hex }} />
+          <p className="font-mono text-2xl font-bold text-center uppercase tracking-widest">{hex}</p>
         </div>
 
-        {/* Active Picker */}
-        <div className="flex flex-col items-center gap-6">
-          {(pickerType === 'hex') && (
-            <HexColorPicker color={color} onChange={setColor} style={{ width: '100%', height: '220px' }} />
-          )}
-          {pickerType === 'rgb' && (
-            <RgbaStringColorPicker color={rgbaStr} onChange={setRgbaStr} style={{ width: '100%', height: '220px' }} />
-          )}
-          {pickerType === 'hsl' && (
-            <HslaStringColorPicker color={hslaStr} onChange={setHslaStr} style={{ width: '100%', height: '220px' }} />
-          )}
-          {pickerType === 'slider' && (
-            <div className="w-full space-y-4">
-              {[['R', rVal, setRVal, '#ef4444'], ['G', gVal, setGVal, '#22c55e'], ['B', bVal, setBVal, '#3b82f6']].map(([l, v, setter, c]) => (
-                <div key={l as string} className="space-y-1">
-                  <div className="flex justify-between text-sm"><span style={{ color: c as string }}>{l as string}</span><span className="text-gray-400">{v as number}</span></div>
-                  <input type="range" min={0} max={255} value={v as number}
-                    onChange={e => { (setter as (v: number) => void)(+e.target.value); applyRGB(); }}
-                    className="w-full" style={{ accentColor: c as string }} />
+        {/* Middle Column: Active Picker Controls */}
+        <div className="flex flex-col gap-6">
+          <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Controls</h3>
+          
+          <div className="tool-card p-4 space-y-6">
+            {pickerType === 'rgb' && (
+              <>
+                {/* Visual RGB Picker */}
+                <RgbColorPicker color={rgb} onChange={setRgb} style={{ width: '100%', height: '200px' }} />
+                
+                {/* RGB Sliders (Lucid Slider integration) */}
+                <div className="space-y-4 pt-4 border-t border-[var(--card-border)]">
+                  {[
+                    ['R', rgb.r, (val: number) => setRgb({ ...rgb, r: val }), '#ef4444'],
+                    ['G', rgb.g, (val: number) => setRgb({ ...rgb, g: val }), '#22c55e'],
+                    ['B', rgb.b, (val: number) => setRgb({ ...rgb, b: val }), '#3b82f6']
+                  ].map(([label, val, setter, colorHex]) => (
+                    <div key={label as string} className="space-y-1">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span style={{ color: colorHex as string }}>{label as string}</span>
+                        <span>{val as number}</span>
+                      </div>
+                      <input type="range" min={0} max={255} value={val as number}
+                        onChange={e => (setter as (v: number) => void)(+e.target.value)}
+                        className="w-full h-2 rounded-lg appearance-none bg-[var(--muted)] cursor-pointer" 
+                        style={{ accentColor: colorHex as string }} 
+                      />
+                    </div>
+                  ))}
                 </div>
-              ))}
-              <button className="btn-primary w-full" onClick={applyRGB}>Apply</button>
-            </div>
-          )}
-          {pickerType === 'material' && (
-            <div className="grid grid-cols-8 gap-2">
+              </>
+            )}
+
+            {pickerType === 'hsl' && (
+              <>
+                <HslColorPicker color={hsl} onChange={handleHslChange} style={{ width: '100%', height: '200px' }} />
+                
+                <div className="space-y-4 pt-4 border-t border-[var(--card-border)]">
+                  {[
+                    ['Hue (H)', hsl.h, 360, (val: number) => handleHslChange({ ...hsl, h: val }), '#a855f7'],
+                    ['Saturation (S)', hsl.s, 100, (val: number) => handleHslChange({ ...hsl, s: val }), '#ec4899'],
+                    ['Lightness (L)', hsl.l, 100, (val: number) => handleHslChange({ ...hsl, l: val }), '#64748b']
+                  ].map(([label, val, max, setter, colorHex]) => (
+                    <div key={label as string} className="space-y-1">
+                      <div className="flex justify-between text-xs font-semibold">
+                        <span className="text-[var(--foreground)]">{label as string}</span>
+                        <span>{val as number}{max === 100 ? '%' : '°'}</span>
+                      </div>
+                      <input type="range" min={0} max={max as number} value={val as number}
+                        onChange={e => (setter as (v: number) => void)(+e.target.value)}
+                        className="w-full h-2 rounded-lg appearance-none bg-[var(--muted)] cursor-pointer" 
+                        style={{ accentColor: colorHex as string }} 
+                      />
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {pickerType === 'compact' && (
+              <div className="space-y-4">
+                <input type="color" value={hex} onChange={e => handleHexChange(e.target.value)}
+                  className="w-full h-32 rounded-xl cursor-pointer border-0 p-0 overflow-hidden" />
+                <input className="input-field font-mono text-center uppercase" value={hex}
+                  onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) handleHexChange(e.target.value.padEnd(7, '0')); }} 
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Column: Values & Material Grid */}
+        <div className="flex flex-col gap-6">
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Color Values</h3>
+            
+            {/* Color Value Rows */}
+            {([
+              ['hex', 'HEX', hex.toUpperCase(), null],
+              ['rgb', 'RGB', `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`, `Sat: ${hsl.s}%`], // Added Saturation info to RGB
+              ['hsl', 'HSL', `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`, `Lightness: ${hsl.l}%`], // Emphasized Lightness in HSL
+              ['cmyk', 'CMYK', `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`, null],
+            ] as [CopyFormat, string, string, string | null][]).map(([fmt, label, val, extraInfo]) => (
+              <div key={fmt} className="tool-card p-3 flex items-center justify-between gap-2">
+                <div className="flex-1 overflow-hidden">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xs font-bold">{label}</span>
+                    {extraInfo && <span className="text-[10px] text-[var(--muted-text)] border border-[var(--card-border)] px-1 rounded">{extraInfo}</span>}
+                  </div>
+                  <div className="font-mono text-sm text-[var(--foreground)] truncate">{val}</div>
+                </div>
+                <button
+                  onClick={() => copyFormat(fmt)}
+                  className={`text-xs px-3 py-1.5 rounded-lg transition-all border ${
+                    copied === fmt 
+                      ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800' 
+                      : 'bg-[var(--muted)] text-[var(--foreground)] border-[var(--card-border)] hover:border-[var(--foreground)]'
+                  }`}
+                >
+                  {copied === fmt ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Material / Dino Flat Color Grid - Now permanently on the right side */}
+          <div className="space-y-3 mt-4">
+            <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Material Colors</h3>
+            <div className="tool-card p-4 grid grid-cols-8 gap-2">
               {MATERIAL_COLORS.map(c => (
-                <button key={c} onClick={() => setColor(c)}
-                  className="w-8 h-8 rounded-lg border-2 transition-all"
-                  style={{ background: c, borderColor: color === c ? '#6366f1' : 'transparent' }}
+                <button key={c} onClick={() => handleHexChange(c)}
+                  title={c}
+                  className="w-full aspect-square rounded-md border transition-transform hover:scale-110 shadow-sm"
+                  style={{ 
+                    background: c, 
+                    borderColor: hex.toLowerCase() === c.toLowerCase() ? 'var(--foreground)' : 'rgba(0,0,0,0.1)' 
+                  }}
                 />
               ))}
             </div>
-          )}
-          {pickerType === 'compact' && (
-            <div className="space-y-4 w-full">
-              <input type="color" value={color} onChange={e => setColor(e.target.value)}
-                className="w-full h-32 rounded-xl cursor-pointer border-0" />
-              <input className="input-field font-mono text-center uppercase" value={color}
-                onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) setColor(e.target.value); }} />
-            </div>
-          )}
-
-          {/* Preview */}
-          <div className="w-full rounded-2xl h-20 shadow-lg" style={{ background: color }} />
-          <p className="font-mono text-lg font-bold text-white">{color.toUpperCase()}</p>
-        </div>
-
-        {/* Color Values */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Color Values</h3>
-          {([
-            ['hex', 'HEX', color.toUpperCase()],
-            ['rgb', 'RGB', `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`],
-            ['hsl', 'HSL', `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`],
-            ['cmyk', 'CMYK', `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`],
-            ['hsv', 'HSV', `hsv(${hsv.h}, ${hsv.s}%, ${hsv.v}%)`],
-          ] as [CopyFormat, string, string][]).map(([fmt, label, val]) => (
-            <div key={fmt} className="tool-card p-3 flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs text-gray-500">{label}</div>
-                <div className="font-mono text-sm text-indigo-300">{val}</div>
-              </div>
-              <button
-                onClick={() => copyFormat(fmt)}
-                className={`text-xs px-3 py-1 rounded-lg transition-all ${copied === fmt ? 'bg-green-800 text-green-300' : 'bg-gray-700 hover:bg-indigo-700 text-gray-400 hover:text-white'}`}
-              >
-                {copied === fmt ? '✓' : 'Copy'}
-              </button>
-            </div>
-          ))}
+          </div>
+          
         </div>
       </div>
     </ToolPageWrapper>
