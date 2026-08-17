@@ -5,7 +5,6 @@ const isProd = process.env.NODE_ENV === "production";
 const nextConfig: NextConfig = {
   output: "export",
   basePath: isProd ? "/Mightycgm-Utility" : "",
-  assetPrefix: isProd ? "/Mightycgm-Utility/" : "",
   trailingSlash: true,
   typescript: {
     ignoreBuildErrors: true,

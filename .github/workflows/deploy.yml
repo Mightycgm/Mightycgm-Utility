@@ -28,6 +28,8 @@ jobs:
         run: npm install --legacy-peer-deps
       - name: Build with Next.js
         run: npm run build
+      - name: Create .nojekyll
+        run: touch ./out/.nojekyll
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
