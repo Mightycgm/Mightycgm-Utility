@@ -1,24 +1,28 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
-import { RgbColorPicker, HslColorPicker } from 'react-colorful';
+import { RgbaColorPicker, HslaColorPicker } from 'react-colorful';
 
-type PickerType = 'rgb' | 'hsl' | 'compact';
+type PickerType = 'rgb' | 'hsl';
 type CopyFormat = 'hex' | 'rgb' | 'hsl' | 'cmyk' | 'hsv';
 
-// --- Conversions (Single Source of Truth is HEX or RGB) ---
-function hexToRgb(hex: string) {
+// --- Conversions (Single Source of Truth is RGBA object) ---
+function hexToRgba(hex: string) {
   const r = parseInt(hex.slice(1, 3), 16) || 0;
   const g = parseInt(hex.slice(3, 5), 16) || 0;
   const b = parseInt(hex.slice(5, 7), 16) || 0;
-  return { r, g, b };
+  const a = hex.length === 9 ? (parseInt(hex.slice(7, 9), 16) / 255) : 1;
+  return { r, g, b, a: Number(a.toFixed(2)) };
 }
 
-function rgbToHex(r: number, g: number, b: number) {
-  return '#' + [r, g, b].map(x => {
-    const hex = Math.round(x).toString(16);
+function rgbaToHex(r: number, g: number, b: number, a: number) {
+  const toHex = (n: number) => {
+    const hex = Math.round(n).toString(16);
     return hex.length === 1 ? '0' + hex : hex;
-  }).join('');
+  };
+  const hexStr = '#' + [r, g, b].map(toHex).join('');
+  if (a < 1) return hexStr + toHex(a * 255);
+  return hexStr;
 }
 
 function rgbToHsl(r: number, g: number, b: number) {
@@ -74,9 +78,8 @@ function rgbToHsv(r: number, g: number, b: number) {
 }
 
 const PICKER_TYPES: { key: PickerType; label: string; desc: string }[] = [
-  { key: 'rgb', label: 'RGB Picker + Slider', desc: 'Red, Green, Blue channels' },
-  { key: 'hsl', label: 'HSL Picker', desc: 'Hue, Saturation, Lightness' },
-  { key: 'compact', label: 'Compact Native', desc: 'System native swatch picker' },
+  { key: 'rgb', label: 'RGB Picker + Slider', desc: 'Red, Green, Blue, Alpha channels' },
+  { key: 'hsl', label: 'HSL Picker', desc: 'Hue, Saturation, Lightness, Alpha' },
 ];
 
 const MATERIAL_COLORS = [
@@ -86,34 +89,57 @@ const MATERIAL_COLORS = [
   '#ffcdd2','#f8bbd0','#e1bee7','#c5cae9','#bbdefb','#b3e5fc','#b2dfdb','#c8e6c9',
 ];
 
+// Reusable Slider Component with dynamic backgrounds
+const ColorSlider = ({ label, value, max, setter, gradient, isAlpha = false }: any) => (
+  <div className="space-y-2">
+    <div className="flex justify-between text-xs font-semibold">
+      <span className="text-[var(--foreground)]">{label}</span>
+      <span>{isAlpha ? value.toFixed(2) : value}{max === 100 && !isAlpha ? '%' : max === 360 ? '°' : ''}</span>
+    </div>
+    {/* Checkerboard background for transparency preview */}
+    <div 
+      className="relative w-full h-3 rounded-full" 
+      style={isAlpha ? { 
+        background: 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 / 12px 12px',
+        boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.1)' 
+      } : {}}
+    >
+      <input 
+        type="range" min={0} max={max} step={isAlpha ? 0.01 : 1} value={value}
+        onChange={e => setter(+e.target.value)}
+        className="color-slider absolute inset-0 w-full h-full"
+        style={{ background: gradient }}
+      />
+    </div>
+  </div>
+);
+
 export default function ColorPickerPage() {
-  // Single source of truth is RGB object for smooth slider dragging
-  const [rgb, setRgb] = useState({ r: 99, g: 102, b: 241 });
+  const [rgba, setRgba] = useState({ r: 99, g: 102, b: 241, a: 1 });
   const [pickerType, setPickerType] = useState<PickerType>('rgb');
   const [copied, setCopied] = useState('');
 
   // Derived states
-  const hex = rgbToHex(rgb.r, rgb.g, rgb.b);
-  const hsl = rgbToHsl(rgb.r, rgb.g, rgb.b);
-  const cmyk = rgbToCmyk(rgb.r, rgb.g, rgb.b);
-  const hsv = rgbToHsv(rgb.r, rgb.g, rgb.b);
+  const hex = rgbaToHex(rgba.r, rgba.g, rgba.b, rgba.a);
+  const hsl = rgbToHsl(rgba.r, rgba.g, rgba.b);
+  const cmyk = rgbToCmyk(rgba.r, rgba.g, rgba.b);
+  const hsv = rgbToHsv(rgba.r, rgba.g, rgba.b);
 
   const handleHexChange = (newHex: string) => {
-    if (/^#[0-9A-Fa-f]{6}$/.test(newHex)) {
-      setRgb(hexToRgb(newHex));
-    }
+    setRgba(hexToRgba(newHex));
   };
 
-  const handleHslChange = (newHsl: { h: number, s: number, l: number }) => {
-    setRgb(hslToRgb(newHsl.h, newHsl.s, newHsl.l));
+  const handleHslChange = (newHsl: { h: number, s: number, l: number, a: number }) => {
+    const rgb = hslToRgb(newHsl.h, newHsl.s, newHsl.l);
+    setRgba({ ...rgb, a: newHsl.a });
   };
 
   const copyFormat = (fmt: CopyFormat) => {
     let text = '';
     switch (fmt) {
       case 'hex': text = hex.toUpperCase(); break;
-      case 'rgb': text = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`; break;
-      case 'hsl': text = `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`; break;
+      case 'rgb': text = rgba.a < 1 ? `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})` : `rgb(${rgba.r}, ${rgba.g}, ${rgba.b})`; break;
+      case 'hsl': text = rgba.a < 1 ? `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${rgba.a})` : `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`; break;
       case 'cmyk': text = `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`; break;
       case 'hsv': text = `hsv(${hsv.h}, ${hsv.s}%, ${hsv.v}%)`; break;
     }
@@ -123,8 +149,9 @@ export default function ColorPickerPage() {
   };
 
   return (
-    <ToolPageWrapper title="Color Picker" description="RGB/HSL Pickers + Value Converter" emoji="🎨">
+    <ToolPageWrapper title="Color Picker" description="RGB/HSL Pickers + Alpha + Value Converter" emoji="🎨">
       <div className="grid lg:grid-cols-3 gap-8 mb-8">
+        
         {/* Left Column: Picker Selection & Visual Preview */}
         <div className="space-y-6">
           <div className="space-y-3">
@@ -138,7 +165,12 @@ export default function ColorPickerPage() {
             ))}
           </div>
 
-          <div className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)]" style={{ background: hex }} />
+          <div 
+            className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)] relative overflow-hidden" 
+            style={{ background: 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 0 / 20px 20px' }}
+          >
+            <div className="absolute inset-0" style={{ background: `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})` }} />
+          </div>
           <p className="font-mono text-2xl font-bold text-center uppercase tracking-widest">{hex}</p>
         </div>
 
@@ -149,66 +181,36 @@ export default function ColorPickerPage() {
           <div className="tool-card p-4 space-y-6">
             {pickerType === 'rgb' && (
               <>
-                {/* Visual RGB Picker */}
-                <RgbColorPicker color={rgb} onChange={setRgb} style={{ width: '100%', height: '200px' }} />
+                <RgbaColorPicker color={rgba} onChange={setRgba} style={{ width: '100%', height: '200px' }} />
                 
-                {/* RGB Sliders (Lucid Slider integration) */}
-                <div className="space-y-4 pt-4 border-t border-[var(--card-border)]">
-                  {[
-                    ['R', rgb.r, (val: number) => setRgb({ ...rgb, r: val }), '#ef4444'],
-                    ['G', rgb.g, (val: number) => setRgb({ ...rgb, g: val }), '#22c55e'],
-                    ['B', rgb.b, (val: number) => setRgb({ ...rgb, b: val }), '#3b82f6']
-                  ].map(([label, val, setter, colorHex]) => (
-                    <div key={label as string} className="space-y-1">
-                      <div className="flex justify-between text-xs font-semibold">
-                        <span style={{ color: colorHex as string }}>{label as string}</span>
-                        <span>{val as number}</span>
-                      </div>
-                      <input type="range" min={0} max={255} value={val as number}
-                        onChange={e => (setter as (v: number) => void)(+e.target.value)}
-                        className="w-full h-2 rounded-lg appearance-none bg-[var(--muted)] cursor-pointer" 
-                        style={{ accentColor: colorHex as string }} 
-                      />
-                    </div>
-                  ))}
+                <div className="space-y-5 pt-4 border-t border-[var(--card-border)]">
+                  <ColorSlider label="Red (R)" value={rgba.r} max={255} setter={(v: number) => setRgba({...rgba, r: v})}
+                    gradient={`linear-gradient(to right, rgba(0, ${rgba.g}, ${rgba.b}, 1), rgba(255, ${rgba.g}, ${rgba.b}, 1))`} />
+                  <ColorSlider label="Green (G)" value={rgba.g} max={255} setter={(v: number) => setRgba({...rgba, g: v})}
+                    gradient={`linear-gradient(to right, rgba(${rgba.r}, 0, ${rgba.b}, 1), rgba(${rgba.r}, 255, ${rgba.b}, 1))`} />
+                  <ColorSlider label="Blue (B)" value={rgba.b} max={255} setter={(v: number) => setRgba({...rgba, b: v})}
+                    gradient={`linear-gradient(to right, rgba(${rgba.r}, ${rgba.g}, 0, 1), rgba(${rgba.r}, ${rgba.g}, 255, 1))`} />
+                  <ColorSlider label="Alpha (A)" value={rgba.a} max={1} isAlpha={true} setter={(v: number) => setRgba({...rgba, a: v})}
+                    gradient={`linear-gradient(to right, rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 0), rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, 1))`} />
                 </div>
               </>
             )}
 
             {pickerType === 'hsl' && (
               <>
-                <HslColorPicker color={hsl} onChange={handleHslChange} style={{ width: '100%', height: '200px' }} />
+                <HslaColorPicker color={{ h: hsl.h, s: hsl.s, l: hsl.l, a: rgba.a }} onChange={handleHslChange} style={{ width: '100%', height: '200px' }} />
                 
-                <div className="space-y-4 pt-4 border-t border-[var(--card-border)]">
-                  {[
-                    ['Hue (H)', hsl.h, 360, (val: number) => handleHslChange({ ...hsl, h: val }), '#a855f7'],
-                    ['Saturation (S)', hsl.s, 100, (val: number) => handleHslChange({ ...hsl, s: val }), '#ec4899'],
-                    ['Lightness (L)', hsl.l, 100, (val: number) => handleHslChange({ ...hsl, l: val }), '#64748b']
-                  ].map(([label, val, max, setter, colorHex]) => (
-                    <div key={label as string} className="space-y-1">
-                      <div className="flex justify-between text-xs font-semibold">
-                        <span className="text-[var(--foreground)]">{label as string}</span>
-                        <span>{val as number}{max === 100 ? '%' : '°'}</span>
-                      </div>
-                      <input type="range" min={0} max={max as number} value={val as number}
-                        onChange={e => (setter as (v: number) => void)(+e.target.value)}
-                        className="w-full h-2 rounded-lg appearance-none bg-[var(--muted)] cursor-pointer" 
-                        style={{ accentColor: colorHex as string }} 
-                      />
-                    </div>
-                  ))}
+                <div className="space-y-5 pt-4 border-t border-[var(--card-border)]">
+                  <ColorSlider label="Hue (H)" value={hsl.h} max={360} setter={(v: number) => handleHslChange({...hsl, a: rgba.a, h: v})}
+                    gradient={`linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00)`} />
+                  <ColorSlider label="Saturation (S)" value={hsl.s} max={100} setter={(v: number) => handleHslChange({...hsl, a: rgba.a, s: v})}
+                    gradient={`linear-gradient(to right, hsl(${hsl.h}, 0%, ${hsl.l}%), hsl(${hsl.h}, 100%, ${hsl.l}%))`} />
+                  <ColorSlider label="Lightness (L)" value={hsl.l} max={100} setter={(v: number) => handleHslChange({...hsl, a: rgba.a, l: v})}
+                    gradient={`linear-gradient(to right, #000, hsl(${hsl.h}, ${hsl.s}%, 50%), #fff)`} />
+                  <ColorSlider label="Alpha (A)" value={rgba.a} max={1} isAlpha={true} setter={(v: number) => handleHslChange({...hsl, a: v})}
+                    gradient={`linear-gradient(to right, hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, 0), hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, 1))`} />
                 </div>
               </>
-            )}
-
-            {pickerType === 'compact' && (
-              <div className="space-y-4">
-                <input type="color" value={hex} onChange={e => handleHexChange(e.target.value)}
-                  className="w-full h-32 rounded-xl cursor-pointer border-0 p-0 overflow-hidden" />
-                <input className="input-field font-mono text-center uppercase" value={hex}
-                  onChange={e => { if (/^#[0-9a-fA-F]{0,6}$/.test(e.target.value)) handleHexChange(e.target.value.padEnd(7, '0')); }} 
-                />
-              </div>
             )}
           </div>
         </div>
@@ -218,20 +220,16 @@ export default function ColorPickerPage() {
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Color Values</h3>
             
-            {/* Color Value Rows */}
             {([
-              ['hex', 'HEX', hex.toUpperCase(), null],
-              ['rgb', 'RGB', `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`, `Sat: ${hsl.s}%`], // Added Saturation info to RGB
-              ['hsl', 'HSL', `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`, `Lightness: ${hsl.l}%`], // Emphasized Lightness in HSL
-              ['cmyk', 'CMYK', `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`, null],
-            ] as [CopyFormat, string, string, string | null][]).map(([fmt, label, val, extraInfo]) => (
+              ['hex', 'HEX', hex.toUpperCase()],
+              ['rgb', 'RGB', rgba.a < 1 ? `rgba(${rgba.r}, ${rgba.g}, ${rgba.b}, ${rgba.a})` : `rgb(${rgba.r}, ${rgba.g}, ${rgba.b})`],
+              ['hsl', 'HSL', rgba.a < 1 ? `hsla(${hsl.h}, ${hsl.s}%, ${hsl.l}%, ${rgba.a})` : `hsl(${hsl.h}, ${hsl.s}%, ${hsl.l}%)`],
+              ['cmyk', 'CMYK', `cmyk(${cmyk.c}%, ${cmyk.m}%, ${cmyk.y}%, ${cmyk.k}%)`],
+            ] as [CopyFormat, string, string][]).map(([fmt, label, val]) => (
               <div key={fmt} className="tool-card p-3 flex items-center justify-between gap-2">
                 <div className="flex-1 overflow-hidden">
-                  <div className="flex items-baseline gap-2">
-                    <span className="text-xs font-bold">{label}</span>
-                    {extraInfo && <span className="text-[10px] text-[var(--muted-text)] border border-[var(--card-border)] px-1 rounded">{extraInfo}</span>}
-                  </div>
-                  <div className="font-mono text-sm text-[var(--foreground)] truncate">{val}</div>
+                  <span className="text-xs font-bold mr-2">{label}</span>
+                  <div className="font-mono text-sm text-[var(--foreground)] truncate mt-1">{val}</div>
                 </div>
                 <button
                   onClick={() => copyFormat(fmt)}
@@ -247,7 +245,6 @@ export default function ColorPickerPage() {
             ))}
           </div>
 
-          {/* Material / Dino Flat Color Grid - Now permanently on the right side */}
           <div className="space-y-3 mt-4">
             <h3 className="text-sm font-semibold text-[var(--muted-text)] uppercase tracking-wider">Material Colors</h3>
             <div className="tool-card p-4 grid grid-cols-8 gap-2">
@@ -257,13 +254,12 @@ export default function ColorPickerPage() {
                   className="w-full aspect-square rounded-md border transition-transform hover:scale-110 shadow-sm"
                   style={{ 
                     background: c, 
-                    borderColor: hex.toLowerCase() === c.toLowerCase() ? 'var(--foreground)' : 'rgba(0,0,0,0.1)' 
+                    borderColor: hex.slice(0,7).toLowerCase() === c.toLowerCase() ? 'var(--foreground)' : 'rgba(0,0,0,0.1)' 
                   }}
                 />
               ))}
             </div>
           </div>
-          
         </div>
       </div>
     </ToolPageWrapper>
