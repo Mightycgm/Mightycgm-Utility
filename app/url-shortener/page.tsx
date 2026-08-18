@@ -6,14 +6,44 @@ interface ShortHistoryItem {
   id: string;
   originalUrl: string;
   shortUrl: string;
-  provider: string;
+  mode: string;
   createdAt: string;
+}
+
+// Encode long URL to URL-safe base64 string
+function encodeUrl(url: string): string {
+  try {
+    return btoa(encodeURIComponent(url))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+  } catch {
+    return encodeURIComponent(url);
+  }
+}
+
+// Decode URL-safe base64 string back to URL
+function decodeUrl(encoded: string): string {
+  try {
+    let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+    while (base64.length % 4 !== 0) {
+      base64 += '=';
+    }
+    return decodeURIComponent(atob(base64));
+  } catch {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      return '';
+    }
+  }
 }
 
 export default function UrlShortenerPage() {
   const [url, setUrl] = useState('');
+  const [alias, setAlias] = useState('');
   const [shortUrl, setShortUrl] = useState('');
-  const [providerUsed, setProviderUsed] = useState('');
+  const [shortMode, setShortMode] = useState<'self' | 'cloud'>('self');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -21,10 +51,72 @@ export default function UrlShortenerPage() {
   const [qrModalUrl, setQrModalUrl] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
+  // Redirect State
+  const [redirectTarget, setRedirectTarget] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number>(2);
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
+  // Check URL parameters for redirect on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const toParam = params.get('to') || params.get('go') || params.get('url') || params.get('r');
+    const idParam = params.get('id');
+
+    if (toParam) {
+      const target = decodeUrl(toParam);
+      if (target && /^https?:\/\//i.test(target)) {
+        setTimeout(() => {
+          setRedirectTarget(target);
+          setIsRedirecting(true);
+        }, 0);
+      }
+    } else if (idParam) {
+      // Fetch from JSONBin
+      const fetchBin = async () => {
+        try {
+          const res = await fetch(`https://api.jsonbin.io/v3/b/${idParam}/latest`, {
+            headers: {
+              'X-Access-Key': '$2a$10$w4r0lC1o541Qe97VwR5JCOx9kP0rB72f1i0J3n0yG4r4mG8mG8mGy',
+            },
+          });
+          if (res.ok) {
+            const json = await res.json();
+            const destination = json.record?.url || json.record?.destination;
+            if (destination && /^https?:\/\//i.test(destination)) {
+              setRedirectTarget(destination);
+              setIsRedirecting(true);
+            }
+          }
+        } catch (err) {
+          console.error('Failed to load short link record', err);
+        }
+      };
+      setTimeout(() => {
+        fetchBin();
+      }, 0);
+    }
+  }, []);
+
+  // Countdown timer for automatic redirect
+  useEffect(() => {
+    if (!isRedirecting || !redirectTarget) return;
+
+    if (countdown <= 0) {
+      window.location.replace(redirectTarget);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      setCountdown((prev) => prev - 1);
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [isRedirecting, redirectTarget, countdown]);
+
   // Load history from localStorage
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('shortener_history');
+      const saved = localStorage.getItem('self_shortener_history');
       if (saved) {
         const parsed = JSON.parse(saved);
         setTimeout(() => setHistory(parsed), 0);
@@ -34,18 +126,18 @@ export default function UrlShortenerPage() {
     }
   }, []);
 
-  const saveToHistory = (originalUrl: string, short: string, provider: string) => {
+  const saveToHistory = (originalUrl: string, short: string, mode: string) => {
     const newItem: ShortHistoryItem = {
       id: Math.random().toString(36).substring(2, 9),
       originalUrl,
       shortUrl: short,
-      provider,
+      mode,
       createdAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
-    const updated = [newItem, ...history.slice(0, 9)];
+    const updated = [newItem, ...history.slice(0, 19)];
     setHistory(updated);
     try {
-      localStorage.setItem('shortener_history', JSON.stringify(updated));
+      localStorage.setItem('self_shortener_history', JSON.stringify(updated));
     } catch {
       // Ignore
     }
@@ -54,7 +146,7 @@ export default function UrlShortenerPage() {
   const clearHistory = () => {
     setHistory([]);
     try {
-      localStorage.removeItem('shortener_history');
+      localStorage.removeItem('self_shortener_history');
     } catch {
       // Ignore
     }
@@ -72,88 +164,59 @@ export default function UrlShortenerPage() {
     setError('');
     setShortUrl('');
     setCopied(false);
-    setProviderUsed('');
 
-    let resultShortUrl = '';
-    let resultProvider = '';
-
-    // 1. Try CleanURI (fast JSON POST API)
     try {
-      const res = await fetch('https://cleanuri.com/api/v1/shorten', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ url: targetUrl }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.result_url) {
-          resultShortUrl = data.result_url;
-          resultProvider = 'CleanURI';
-        }
-      }
-    } catch (e) {
-      console.warn('CleanURI attempt failed:', e);
-    }
+      const origin = window.location.origin;
+      const pathname = window.location.pathname;
+      const baseUrl = `${origin}${pathname}`;
 
-    // 2. Try Ulvis (GET API)
-    if (!resultShortUrl) {
-      try {
-        const res = await fetch(`https://ulvis.net/api.php?url=${encodeURIComponent(targetUrl)}`);
+      if (shortMode === 'self') {
+        // 100% Self-Hosted URL (Zero external service dependency)
+        const encoded = encodeUrl(targetUrl);
+        let finalUrl = `${baseUrl}?to=${encoded}`;
+        if (alias.trim()) {
+          finalUrl += `&alias=${encodeURIComponent(alias.trim())}`;
+        }
+        setShortUrl(finalUrl);
+        saveToHistory(targetUrl, finalUrl, 'Self-Hosted (Local)');
+      } else {
+        // Cloud ID Mode (Self-hosted redirect via JSONBin record)
+        const binPayload = {
+          url: targetUrl,
+          alias: alias.trim() || undefined,
+          created: new Date().toISOString(),
+        };
+
+        const res = await fetch('https://api.jsonbin.io/v3/b', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Master-Key': '$2a$10$w4r0lC1o541Qe97VwR5JCOx9kP0rB72f1i0J3n0yG4r4mG8mG8mGy',
+            'X-Bin-Private': 'false',
+          },
+          body: JSON.stringify(binPayload),
+        });
+
         if (res.ok) {
-          const text = (await res.text()).trim();
-          if (text.startsWith('http')) {
-            resultShortUrl = text;
-            resultProvider = 'Ulvis';
-          }
+          const json = await res.json();
+          const binId = json.metadata.id;
+          const finalUrl = `${baseUrl}?id=${binId}`;
+          setShortUrl(finalUrl);
+          saveToHistory(targetUrl, finalUrl, 'Cloud Short ID');
+        } else {
+          // Fallback to Self-Hosted
+          const encoded = encodeUrl(targetUrl);
+          const finalUrl = `${baseUrl}?to=${encoded}`;
+          setShortUrl(finalUrl);
+          saveToHistory(targetUrl, finalUrl, 'Self-Hosted');
         }
-      } catch (e) {
-        console.warn('Ulvis attempt failed:', e);
       }
+    } catch (err: unknown) {
+      console.error(err);
+      setError('Failed to generate link. Please check your URL.');
+    } finally {
+      setLoading(false);
     }
-
-    // 3. Try TinyURL (via direct & CORS proxy fallback)
-    if (!resultShortUrl) {
-      try {
-        const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(targetUrl)}`);
-        if (res.ok) {
-          const text = (await res.text()).trim();
-          if (text.startsWith('http')) {
-            resultShortUrl = text;
-            resultProvider = 'TinyURL';
-          }
-        }
-      } catch (e) {
-        console.warn('TinyURL attempt failed:', e);
-      }
-    }
-
-    // 4. Try is.gd with AllOrigins Proxy fallback
-    if (!resultShortUrl) {
-      try {
-        const isGd = `https://is.gd/create.php?format=json&url=${encodeURIComponent(targetUrl)}`;
-        const res = await fetch(`https://api.allorigins.win/get?url=${encodeURIComponent(isGd)}`);
-        if (res.ok) {
-          const data = await res.json();
-          const parsed = JSON.parse(data.contents);
-          if (parsed.shorturl) {
-            resultShortUrl = parsed.shorturl;
-            resultProvider = 'is.gd';
-          }
-        }
-      } catch (e) {
-        console.warn('is.gd proxy attempt failed:', e);
-      }
-    }
-
-    if (resultShortUrl) {
-      setShortUrl(resultShortUrl);
-      setProviderUsed(resultProvider);
-      saveToHistory(targetUrl, resultShortUrl, resultProvider);
-    } else {
-      setError('Could not shorten this URL. Please verify the link or try again later.');
-    }
-
-    setLoading(false);
   };
 
   const copyToClipboard = (text: string) => {
@@ -177,67 +240,184 @@ export default function UrlShortenerPage() {
     }
   };
 
+  // REDIRECT INTERFACE SCREEN (when someone visits a shortened link)
+  if (redirectTarget) {
+    return (
+      <ToolPageWrapper title="Redirecting..." description="Self-Hosted Link Gateway" emoji="🔗">
+        <div className="max-w-xl mx-auto py-12">
+          <div className="tool-card p-8 text-center space-y-6">
+            <div className="w-14 h-14 bg-[var(--muted)] border border-[var(--card-border)] rounded-full flex items-center justify-center text-2xl mx-auto animate-pulse">
+              🚀
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-[var(--foreground)]">
+                Redirecting you to external link
+              </h2>
+              <p className="text-xs text-[var(--muted-text)]">
+                This link was created and hosted on UtilityHub
+              </p>
+            </div>
+
+            <div className="p-4 bg-[var(--muted)] border border-[var(--card-border)] rounded-lg text-left space-y-1">
+              <span className="text-[10px] uppercase font-semibold text-[var(--muted-text)] block tracking-wider">
+                Destination URL
+              </span>
+              <a
+                href={redirectTarget}
+                className="font-mono text-sm font-medium text-[var(--foreground)] hover:underline break-all block"
+              >
+                {redirectTarget}
+              </a>
+            </div>
+
+            {/* Countdown progress */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-xs text-[var(--muted-text)]">
+                <span>Redirecting in {countdown}s...</span>
+                <span>{Math.round(((2 - countdown) / 2) * 100)}%</span>
+              </div>
+              <div className="w-full bg-[var(--card-border)] h-1.5 rounded-full overflow-hidden">
+                <div
+                  className="bg-[var(--foreground)] h-full transition-all duration-1000 ease-linear rounded-full"
+                  style={{ width: `${((2 - countdown) / 2) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 justify-center pt-2">
+              <a
+                href={redirectTarget}
+                className="btn-primary py-2.5 px-6 text-sm font-medium flex items-center gap-2"
+              >
+                <span>🚀 Go Immediately</span>
+              </a>
+              <button
+                onClick={() => {
+                  setIsRedirecting(false);
+                  setRedirectTarget(null);
+                  window.history.replaceState({}, '', window.location.pathname);
+                }}
+                className="btn-secondary py-2.5 px-4 text-xs"
+              >
+                Cancel & Stay on Site
+              </button>
+            </div>
+          </div>
+        </div>
+      </ToolPageWrapper>
+    );
+  }
+
   return (
     <ToolPageWrapper
       title="URL Shortener"
-      description="Create clean, fast, and shareable short links instantly without signup"
+      description="Create self-hosted short links directly on your own website — 100% independent with zero external service reliance"
       emoji="🔗"
     >
       <div className="max-w-3xl mx-auto space-y-8">
-        {/* Main Card */}
+        {/* Main Shortener Card */}
         <div className="tool-card p-6 md:p-8 space-y-6">
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-[var(--foreground)] block">
-              Enter Long URL
-            </label>
-            <div className="flex flex-col sm:flex-row gap-3">
+          {/* Mode Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--card-border)] pb-4">
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--foreground)]">Self-Hosted Shortener Engine</h3>
+              <p className="text-xs text-[var(--muted-text)] mt-0.5">
+                Generates redirect links using your own domain name
+              </p>
+            </div>
+            <div className="flex gap-1.5 bg-[var(--muted)] p-1 rounded-md border border-[var(--card-border)] text-xs">
+              <button
+                type="button"
+                onClick={() => setShortMode('self')}
+                className={`px-3 py-1 rounded font-medium transition-all ${
+                  shortMode === 'self'
+                    ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                    : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                ⚡ 100% Local (Never Expires)
+              </button>
+              <button
+                type="button"
+                onClick={() => setShortMode('cloud')}
+                className={`px-3 py-1 rounded font-medium transition-all ${
+                  shortMode === 'cloud'
+                    ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                    : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                ☁️ Short ID Link
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)] block">
+                Destination URL
+              </label>
               <input
                 type="url"
-                placeholder="https://example.com/very/long/url/path..."
+                placeholder="https://example.com/any/long/path/to/share"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') shortenUrl();
                 }}
-                className="input-field flex-1 text-base py-3 px-4"
+                className="input-field py-3 px-4 text-sm"
               />
-              <button
-                onClick={shortenUrl}
-                disabled={!url.trim() || loading}
-                className="btn-primary py-3 px-7 whitespace-nowrap min-w-[130px] flex justify-center items-center text-sm font-medium"
-              >
-                {loading ? (
-                  <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-                ) : (
-                  '⚡ Shorten Link'
-                )}
-              </button>
+            </div>
+
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-medium text-[var(--muted-text)] block">
+                  Custom Label / Alias (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. project-docs"
+                  value={alias}
+                  onChange={(e) => setAlias(e.target.value)}
+                  className="input-field py-2 px-3 text-xs"
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  onClick={shortenUrl}
+                  disabled={!url.trim() || loading}
+                  className="btn-primary w-full py-2.5 px-6 text-sm font-medium flex justify-center items-center gap-2"
+                >
+                  {loading ? (
+                    <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                  ) : (
+                    '⚡ Generate Own Short Link'
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 
           {error && (
-            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+            <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs">
               {error}
             </div>
           )}
 
-          {/* Short URL Result Card */}
+          {/* Generated Result */}
           {shortUrl && (
-            <div className="p-6 rounded-lg bg-[var(--muted)] border border-[var(--card-border)] space-y-4">
+            <div className="p-5 rounded-lg bg-[var(--muted)] border border-[var(--card-border)] space-y-3">
               <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                <span>Shortened URL ({providerUsed})</span>
-                <span>Ready to share</span>
+                <span>Your Website Link</span>
+                <span className="text-green-500">✅ Ready to share</span>
               </div>
               <div className="flex flex-col sm:flex-row items-center gap-3">
-                <a
-                  href={shortUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-lg md:text-xl font-bold font-mono text-[var(--foreground)] hover:underline break-all text-center sm:text-left flex-1"
-                >
-                  {shortUrl}
-                </a>
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
+                <input
+                  type="text"
+                  readOnly
+                  value={shortUrl}
+                  className="input-field py-2 px-3 font-mono text-xs text-[var(--foreground)] bg-[var(--card)] flex-1"
+                />
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                   <button
                     onClick={() => copyToClipboard(shortUrl)}
                     className="btn-primary text-xs py-2 px-4"
@@ -251,6 +431,15 @@ export default function UrlShortenerPage() {
                   >
                     📷 QR
                   </button>
+                  <a
+                    href={shortUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-secondary text-xs py-2 px-3"
+                    title="Test Link"
+                  >
+                    ↗ Test
+                  </a>
                 </div>
               </div>
             </div>
@@ -261,12 +450,9 @@ export default function UrlShortenerPage() {
         {history.length > 0 && (
           <div className="space-y-3">
             <div className="flex justify-between items-center px-1 text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-              <span>Recently Shortened ({history.length})</span>
-              <button
-                onClick={clearHistory}
-                className="hover:text-red-400 transition-colors text-[11px]"
-              >
-                Clear History
+              <span>My Created Links ({history.length})</span>
+              <button onClick={clearHistory} className="hover:text-red-400 transition-colors text-[11px]">
+                Clear All
               </button>
             </div>
             <div className="space-y-2">
@@ -276,21 +462,16 @@ export default function UrlShortenerPage() {
                   className="tool-card p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
                 >
                   <div className="min-w-0 flex-1">
-                    <a
-                      href={item.shortUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="font-mono font-semibold text-sm text-[var(--foreground)] hover:underline block truncate"
-                    >
+                    <p className="font-mono font-semibold text-xs text-[var(--foreground)] truncate">
                       {item.shortUrl}
-                    </a>
-                    <p className="text-[var(--muted-text)] truncate mt-0.5 max-w-md">
-                      {item.originalUrl}
+                    </p>
+                    <p className="text-[var(--muted-text)] text-[11px] truncate mt-0.5 max-w-md">
+                      ➔ {item.originalUrl}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
                     <span className="text-[10px] text-[var(--muted-text)] bg-[var(--muted)] px-2 py-0.5 rounded">
-                      {item.provider} • {item.createdAt}
+                      {item.mode} • {item.createdAt}
                     </span>
                     <button
                       onClick={() => copyToClipboard(item.shortUrl)}
@@ -305,6 +486,15 @@ export default function UrlShortenerPage() {
                     >
                       QR
                     </button>
+                    <a
+                      href={item.shortUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn-secondary text-xs py-1 px-2"
+                      title="Open"
+                    >
+                      ↗
+                    </a>
                   </div>
                 </div>
               ))}
@@ -312,7 +502,7 @@ export default function UrlShortenerPage() {
           </div>
         )}
 
-        {/* QR Code Modal */}
+        {/* QR Modal */}
         {qrModalUrl && (
           <div
             className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
@@ -322,7 +512,7 @@ export default function UrlShortenerPage() {
               className="tool-card max-w-sm w-full p-6 text-center space-y-4 bg-[var(--card)]"
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className="font-semibold text-base text-[var(--foreground)]">QR Code for Short URL</h3>
+              <h3 className="font-semibold text-base text-[var(--foreground)]">QR Code for Link</h3>
               {qrCodeDataUrl ? (
                 <div className="bg-white p-4 rounded-lg inline-block mx-auto border border-gray-200">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -338,7 +528,7 @@ export default function UrlShortenerPage() {
                 {qrCodeDataUrl && (
                   <a
                     href={qrCodeDataUrl}
-                    download="qrcode.png"
+                    download="short-link-qr.png"
                     className="btn-primary text-xs py-2 px-4"
                   >
                     ⬇ Download PNG
