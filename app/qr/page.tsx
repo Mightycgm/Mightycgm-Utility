@@ -90,7 +90,8 @@ export default function QRPage() {
           <div className="flex flex-col items-center justify-center">
             {genQR ? (
               <div className="space-y-4 text-center">
-                <img src={genQR} alt="QR Code" className="rounded-2xl mx-auto" style={{ width: Math.min(genSize, 280), height: Math.min(genSize, 280) }} />
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={genQR} alt="QR Code" className="rounded-2xl mx-auto" style={{ width: Math.min(genSize, 280), height: Math.min(genSize, 280) }} />
                 <a href={genQR} download="qrcode.png" className="btn-secondary inline-block px-6">? Download PNG</a>
               </div>
             ) : (

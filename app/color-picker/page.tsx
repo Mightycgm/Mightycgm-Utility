@@ -28,7 +28,7 @@ function rgbaToHex(r: number, g: number, b: number, a: number, includeAlpha: boo
 function rgbToHsl(r: number, g: number, b: number) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0, l = (max + min) / 2;
+  const l = (max + min) / 2; let h = 0, s = 0;
   if (max !== min) {
     const d = max - min;
     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
@@ -90,7 +90,7 @@ const MATERIAL_COLORS = [
 ];
 
 // Reusable Slider Component with dynamic backgrounds
-const ColorSlider = ({ label, value, max, setter, gradient, isAlpha = false }: any) => (
+const ColorSlider = ({ label, value, max, setter, gradient, isAlpha = false }: { label: string, value: number, max: number, setter: (v: number) => void, gradient: string, isAlpha?: boolean }) => (
   <div className="space-y-2">
     <div className="flex justify-between text-xs font-semibold">
       <span className="text-[var(--foreground)]">{label}</span>

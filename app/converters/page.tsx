@@ -12,7 +12,7 @@ const unitCategories = {
 };
 
 function convertTemp(val: number, from: string, to: string) {
-  let c = from === 'C' ? val : from === 'F' ? (val - 32) * 5/9 : val - 273.15;
+  const c = from === 'C' ? val : from === 'F' ? (val - 32) * 5/9 : val - 273.15;
   if (to === 'C') return c;
   if (to === 'F') return c * 9/5 + 32;
   return c + 273.15;

@@ -62,9 +62,11 @@ export default function LogSharePage() {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
-      setTab('view');
-      setRetrieveId(id);
-      retrieve(id);
+      setTimeout(() => {
+        setTab('view');
+        setRetrieveId(id);
+        retrieve(id);
+      }, 0);
     }
   }, []);
 
@@ -147,7 +149,7 @@ export default function LogSharePage() {
             <label className="text-sm text-gray-400 block mb-2">Share Link or Bin ID</label>
             <div className="flex gap-3">
               <input className="input-field font-mono" value={retrieveId} onChange={e => setRetrieveId(e.target.value)} placeholder="Paste link or bin ID..." />
-              <button className="btn-primary px-6" onClick={retrieve} disabled={retrieving}>
+              <button className="btn-primary px-6" onClick={() => retrieve()} disabled={retrieving}>
                 {retrieving ? 'Loading...' : 'Load'}
               </button>
             </div>

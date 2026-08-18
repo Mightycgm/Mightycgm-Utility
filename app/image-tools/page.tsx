@@ -34,6 +34,7 @@ export default function ImageToolsPage() {
     if (!origFile) return;
     setCompressing(true);
     try {
+      const { default: imageCompression } = await import('browser-image-compression');
       const compressed = await imageCompression(origFile, {
         maxSizeMB: 10,
         maxWidthOrHeight: maxWidth,

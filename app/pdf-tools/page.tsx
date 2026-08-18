@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
 type Tab = 'merge' | 'split' | 'to-image' | 'img-to-pdf';
@@ -241,6 +241,7 @@ export default function PdfToolsPage() {
           )}
           {pdfImages[renderPage - 1] && (
             <div className="tool-card p-4 space-y-3">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={pdfImages[renderPage - 1]} alt={`Page ${renderPage}`} className="w-full rounded-xl" />
               <a href={pdfImages[renderPage - 1]} download={`page-${renderPage}.png`} className="btn-primary inline-block text-sm">⬇ Download Page {renderPage}</a>
             </div>

@@ -7,7 +7,8 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    setApiKey(localStorage.getItem('jsonbin_api_key') || '');
+    
+    setTimeout(() => setApiKey(localStorage.getItem('jsonbin_api_key') || ''), 0);
   }, []);
 
   const save = () => {
@@ -18,6 +19,7 @@ export default function SettingsPage() {
 
   const clear = () => {
     localStorage.removeItem('jsonbin_api_key');
+    
     setApiKey('');
   };
 
@@ -40,7 +42,8 @@ export default function SettingsPage() {
               className="input-field font-mono text-sm"
               type="password"
               value={apiKey}
-              onChange={e => setApiKey(e.target.value)}
+              onChange={e => 
+    setApiKey(e.target.value)}
               placeholder="$2b$10$..."
             />
             <div className="flex gap-3">

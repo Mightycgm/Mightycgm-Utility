@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 import axios from 'axios';
-import { nanoid } from 'nanoid';
+
 
 const JSONBIN_URL = 'https://api.jsonbin.io/v3/b';
 
@@ -63,7 +63,7 @@ export default function TextSharePage() {
       // Public read, no API key required
       const res = await axios.get(`${JSONBIN_URL}/${id}/latest`);
       setRetrieved(res.data.record);
-    } catch (e) {
+    } catch {  
       setError('Could not retrieve text. The link might be invalid or deleted.');
     }
     setRetrieving(false);
@@ -74,9 +74,11 @@ export default function TextSharePage() {
     const params = new URLSearchParams(window.location.search);
     const id = params.get('id');
     if (id) {
-      setTab('retrieve');
-      setRetrieveId(id);
-      retrieve(id);
+      setTimeout(() => {
+        setTab('retrieve');
+        setRetrieveId(id);
+        retrieve(id);
+      }, 0);
     }
   }, []);
 
@@ -140,7 +142,7 @@ export default function TextSharePage() {
             <div className="flex gap-3">
               <input className="input-field font-mono" value={retrieveId} onChange={e => setRetrieveId(e.target.value)}
                 placeholder="Paste share link or bin ID..." />
-              <button className="btn-primary px-6" onClick={retrieve} disabled={retrieving}>
+              <button className="btn-primary px-6" onClick={() => retrieve()} disabled={retrieving}>
                 {retrieving ? 'Loading...' : 'Retrieve'}
               </button>
             </div>
