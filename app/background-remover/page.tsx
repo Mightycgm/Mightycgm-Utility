@@ -219,6 +219,7 @@ export default function BackgroundRemoverPage() {
   }, []);
 
   // Global Keyboard Shortcuts (Ctrl+Z for Undo, Ctrl+Y / Ctrl+Shift+Z for Redo)
+  // Uses physical key code (e.code / e.keyCode) to work across ALL keyboard layouts (Thai, EN, etc.)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -226,14 +227,26 @@ export default function BackgroundRemoverPage() {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      const isZKey =
+        e.code === 'KeyZ' ||
+        e.key.toLowerCase() === 'z' ||
+        e.keyCode === 90 ||
+        e.which === 90;
+
+      const isYKey =
+        e.code === 'KeyY' ||
+        e.key.toLowerCase() === 'y' ||
+        e.keyCode === 89 ||
+        e.which === 89;
+
+      if ((e.ctrlKey || e.metaKey) && isZKey) {
         e.preventDefault();
         if (e.shiftKey) {
           handleRedo();
         } else {
           handleUndo();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      } else if ((e.ctrlKey || e.metaKey) && isYKey) {
         e.preventDefault();
         handleRedo();
       }
