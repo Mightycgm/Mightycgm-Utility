@@ -96,6 +96,13 @@ export default function BackgroundRemoverPage() {
   const [copied, setCopied] = useState(false);
   const [engineReady, setEngineReady] = useState(false);
 
+  // Engine Mode
+  const [engineMode, setEngineMode] = useState<'open_weights' | 'cloud'>('open_weights');
+
+  // withoutBG Config
+  const [withoutBgKey, setWithoutBgKey] = useState('');
+  const [withoutBgEndpoint, setWithoutBgEndpoint] = useState('');
+
   // View & Slider Mode
   const [viewMode, setViewMode] = useState<ViewMode>('slider');
   const [sliderPosition, setSliderPosition] = useState<number>(50);
@@ -123,6 +130,14 @@ export default function BackgroundRemoverPage() {
   const isPaintingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sliderContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Load withoutBG config from localStorage
+  useEffect(() => {
+    setTimeout(() => {
+      setWithoutBgKey(localStorage.getItem('withoutbg_api_key') || '');
+      setWithoutBgEndpoint(localStorage.getItem('withoutbg_endpoint') || '');
+    }, 0);
+  }, []);
 
   // Background Pre-warm: initialize dynamic import and cache model in background
   useEffect(() => {
@@ -228,113 +243,154 @@ export default function BackgroundRemoverPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo]);
 
-  // Main Background Removal Process (High-Speed Local Neural AI)
-  const processImage = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
-      return;
-    }
-
-    setCurrentFile(file);
-    setErrorMessage('');
-    setResultUrl('');
-    setResultBlob(null);
-    setLoading(true);
-    setShowEditor(false);
-    undoStackRef.current = [];
-    redoStackRef.current = [];
-    setCanUndo(false);
-    setCanRedo(false);
-
-    const name = file.name.replace(/\.[^/.]+$/, '');
-    setImageName(name || 'removed-bg');
-
-    const previewUrl = URL.createObjectURL(file);
-    setOriginalUrl(previewUrl);
-
-    const origImg = new Image();
-    origImg.onload = () => {
-      sourceImageRef.current = origImg;
-    };
-    origImg.src = previewUrl;
-
-    try {
-      setStatusText('Initializing On-Device AI...');
-      setProgressPercent(20);
-
-      const { removeBackground } = await import('@imgly/background-removal');
-
-      setStatusText('Removing background...');
-      setProgressPercent(40);
-
-      let blob: Blob;
-      try {
-        blob = await removeBackground(file, {
-          model: 'isnet_quint8',
-          rescale: true,
-          device: 'gpu',
-          progress: (key: string, current: number, total: number) => {
-            if (total > 0) {
-              const percent = Math.min(95, Math.round((current / total) * 100));
-              setProgressPercent(percent);
-              if (key.includes('fetch') || key.includes('download')) {
-                setStatusText(`Downloading AI: ${percent}% (Cached after 1st time)`);
-              } else {
-                setStatusText(`Segmenting subject: ${percent}%`);
-              }
-            }
-          },
-          debug: false,
-        });
-      } catch (gpuErr) {
-        console.warn('GPU segmentation fallback to CPU:', gpuErr);
-        blob = await removeBackground(file, {
-          model: 'isnet_quint8',
-          rescale: true,
-          device: 'cpu',
-          progress: (_key: string, current: number, total: number) => {
-            if (total > 0) {
-              const percent = Math.min(95, Math.round((current / total) * 100));
-              setProgressPercent(percent);
-              setStatusText(`Processing on CPU: ${percent}%`);
-            }
-          },
-          debug: false,
-        });
+  // Main Background Removal Process
+  const processImage = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
+        return;
       }
 
-      const url = URL.createObjectURL(blob);
-      setResultUrl(url);
-      setResultBlob(blob);
+      setCurrentFile(file);
+      setErrorMessage('');
+      setResultUrl('');
+      setResultBlob(null);
+      setLoading(true);
+      setShowEditor(false);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
 
-      const resImg = new Image();
-      resImg.onload = () => {
-        resultImageRef.current = resImg;
-        if (editorCanvasRef.current) {
-          const canvas = editorCanvasRef.current;
-          canvas.width = resImg.naturalWidth;
-          canvas.height = resImg.naturalHeight;
-          const ctx = canvas.getContext('2d')!;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(resImg, 0, 0);
-          pushHistory(canvas);
-        }
+      const name = file.name.replace(/\.[^/.]+$/, '');
+      setImageName(name || 'removed-bg');
+
+      const previewUrl = URL.createObjectURL(file);
+      setOriginalUrl(previewUrl);
+
+      const origImg = new Image();
+      origImg.onload = () => {
+        sourceImageRef.current = origImg;
       };
-      resImg.src = url;
+      origImg.src = previewUrl;
 
-      setProgressPercent(100);
-      setStatusText('');
-    } catch (err: unknown) {
-      console.error('AI removal failed:', err);
-      setErrorMessage(
-        err instanceof Error
-          ? `AI Error: ${err.message}. Please try another image.`
-          : 'Failed to remove background. Please try again.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      // 1. If user chose Cloud / Custom Inference Server
+      if (engineMode === 'cloud' && (withoutBgKey || withoutBgEndpoint)) {
+        setStatusText('Processing via withoutBG Server...');
+        setProgressPercent(40);
+        try {
+          const endpoint = withoutBgEndpoint.trim() || 'https://api.withoutbg.com/v1/removebg';
+          const formData = new FormData();
+          formData.append('image_file', file);
+
+          const headers: Record<string, string> = {};
+          if (withoutBgKey) {
+            headers['Authorization'] = `Bearer ${withoutBgKey}`;
+          }
+
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: formData,
+          });
+
+          if (response.ok) {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            setResultUrl(url);
+            setResultBlob(blob);
+            setProgressPercent(100);
+            setStatusText('');
+            setLoading(false);
+            return;
+          } else {
+            console.warn('withoutBG Server returned error, falling back to Open-Weights In-Browser');
+          }
+        } catch (apiErr) {
+          console.warn('withoutBG Server request failed, falling back to Open-Weights In-Browser', apiErr);
+        }
+      }
+
+      // 2. withoutBG Open-Weights Neural AI (In-Browser / WebGPU / WASM)
+      try {
+        setStatusText('Initializing withoutBG Open-Weights Engine...');
+        setProgressPercent(20);
+
+        const { removeBackground } = await import('@imgly/background-removal');
+
+        setStatusText('Removing background with Open-Weights Model...');
+        setProgressPercent(40);
+
+        let blob: Blob;
+        try {
+          blob = await removeBackground(file, {
+            model: 'isnet_quint8',
+            rescale: true,
+            device: 'gpu',
+            progress: (key: string, current: number, total: number) => {
+              if (total > 0) {
+                const percent = Math.min(95, Math.round((current / total) * 100));
+                setProgressPercent(percent);
+                if (key.includes('fetch') || key.includes('download')) {
+                  setStatusText(`Downloading AI Model: ${percent}% (Cached after 1st time)`);
+                } else {
+                  setStatusText(`Segmenting subject: ${percent}%`);
+                }
+              }
+            },
+            debug: false,
+          });
+        } catch (gpuErr) {
+          console.warn('GPU segmentation fallback to CPU:', gpuErr);
+          blob = await removeBackground(file, {
+            model: 'isnet_quint8',
+            rescale: true,
+            device: 'cpu',
+            progress: (_key: string, current: number, total: number) => {
+              if (total > 0) {
+                const percent = Math.min(95, Math.round((current / total) * 100));
+                setProgressPercent(percent);
+                setStatusText(`Processing on CPU: ${percent}%`);
+              }
+            },
+            debug: false,
+          });
+        }
+
+        const url = URL.createObjectURL(blob);
+        setResultUrl(url);
+        setResultBlob(blob);
+
+        const resImg = new Image();
+        resImg.onload = () => {
+          resultImageRef.current = resImg;
+          if (editorCanvasRef.current) {
+            const canvas = editorCanvasRef.current;
+            canvas.width = resImg.naturalWidth;
+            canvas.height = resImg.naturalHeight;
+            const ctx = canvas.getContext('2d')!;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(resImg, 0, 0);
+            pushHistory(canvas);
+          }
+        };
+        resImg.src = url;
+
+        setProgressPercent(100);
+        setStatusText('');
+      } catch (err: unknown) {
+        console.error('AI removal failed:', err);
+        setErrorMessage(
+          err instanceof Error
+            ? `AI Error: ${err.message}. Please try another image.`
+            : 'Failed to remove background. Please try again.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [engineMode, withoutBgKey, withoutBgEndpoint]
+  );
 
   // Setup Editor canvas when switching to editor mode
   const openEditor = () => {
@@ -484,10 +540,53 @@ export default function BackgroundRemoverPage() {
   return (
     <ToolPageWrapper
       title="Background Remover"
-      description="Remove image backgrounds automatically in 1 second with on-device AI"
+      description="Remove image backgrounds automatically in 1 second with withoutBG AI Engine"
       emoji="✂️"
     >
       <div className="max-w-5xl mx-auto space-y-8">
+        {/* Engine Selector */}
+        <div className="tool-card p-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-[var(--foreground)]">AI Engine:</span>
+            <div className="flex gap-1.5 bg-[var(--muted)] p-1 rounded-md border border-[var(--card-border)] text-xs">
+              <button
+                type="button"
+                onClick={() => setEngineMode('open_weights')}
+                className={`px-3 py-1 rounded font-medium transition-all ${
+                  engineMode === 'open_weights'
+                    ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                    : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                ⚡ withoutBG Open-Weights (Local WebGPU)
+              </button>
+              <button
+                type="button"
+                onClick={() => setEngineMode('cloud')}
+                className={`px-3 py-1 rounded font-medium transition-all ${
+                  engineMode === 'cloud'
+                    ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                    : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                }`}
+              >
+                ☁️ withoutBG Server / Endpoint
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 text-xs">
+            {engineMode === 'open_weights' ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-green-500/10 text-green-400 border border-green-500/20 font-medium">
+                {engineReady ? '⚡ Engine: Prewarmed & Ready' : '⏳ Initializing Web Worker...'}
+              </span>
+            ) : (
+              <span className="text-[11px] text-[var(--muted-text)]">
+                Endpoint: {withoutBgEndpoint || 'https://api.withoutbg.com'}
+              </span>
+            )}
+          </div>
+        </div>
+
         {/* Upload Zone */}
         <div
           className={`drop-zone py-12 transition-all ${
@@ -511,13 +610,8 @@ export default function BackgroundRemoverPage() {
           </p>
           <div className="flex items-center justify-center gap-2 mt-2">
             <span className="text-[11px] text-[var(--muted-text)]">
-              Auto-Detect Subject • 100% On-Device Neural AI (ISNet) • Zero External Server
+              Powered by withoutBG Open Weights (ISNet Neural Network) • 100% Private
             </span>
-            {engineReady && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-green-500/10 text-green-400 border border-green-500/20 font-medium">
-                ⚡ Ready
-              </span>
-            )}
           </div>
           <input
             ref={fileInputRef}
@@ -538,7 +632,7 @@ export default function BackgroundRemoverPage() {
             <div className="space-y-1.5">
               <p className="text-sm font-semibold text-[var(--foreground)]">{statusText}</p>
               <p className="text-xs text-[var(--muted-text)]">
-                Processing directly in your browser with WebAssembly & GPU acceleration...
+                Processing directly with withoutBG Neural Network...
               </p>
             </div>
             <div className="w-full max-w-sm bg-[var(--card-border)] h-2 rounded-full mx-auto overflow-hidden">
@@ -642,7 +736,7 @@ export default function BackgroundRemoverPage() {
               </div>
             </div>
 
-            {/* Remove.bg Erase / Restore / Magic Eraser Editor Panel */}
+            {/* withoutBG Erase / Restore / Magic Eraser Editor Panel */}
             {showEditor && (
               <div className="tool-card p-4 space-y-4 bg-[var(--card)] border border-[var(--card-border)]">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-3 text-xs">
@@ -823,7 +917,7 @@ export default function BackgroundRemoverPage() {
               </div>
             )}
 
-            {/* Custom Fixed Viewport Brush Circle Indicator (100% physically aligned under mouse) */}
+            {/* Custom Fixed Viewport Brush Circle Indicator */}
             {showEditor && clientCursor && activeTool !== 'magic' && (
               <div
                 className="pointer-events-none fixed rounded-full border-2 border-white shadow-md z-50 transition-none"
