@@ -1,5 +1,5 @@
 'use client';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
 type Tab = 'convert' | 'compress';
@@ -235,7 +235,7 @@ export default function ImageToolsPage() {
   const [compressing, setCompressing] = useState(false);
 
   // Add files to Converter
-  const handleFilesAdded = (fileList: FileList | null) => {
+  const handleFilesAdded = useCallback((fileList: FileList | File[] | null) => {
     if (!fileList || fileList.length === 0) return;
     const newItems: FileItem[] = [];
 
@@ -261,7 +261,49 @@ export default function ImageToolsPage() {
     });
 
     setItems((prev) => [...prev, ...newItems]);
-  };
+  }, [globalTargetFormat]);
+
+  // Compress handler
+  const handleCompressUpload = useCallback((file: File) => {
+    setCompFile(file);
+    setCompResultUrl('');
+    setCompOrigSize(file.size);
+    const reader = new FileReader();
+    reader.onload = (e) => setCompPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
+  // Global Ctrl+V Clipboard Paste Handler
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      if (e.clipboardData && e.clipboardData.items) {
+        const files: File[] = [];
+        for (const item of Array.from(e.clipboardData.items)) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) files.push(file);
+          }
+        }
+
+        if (files.length > 0) {
+          e.preventDefault();
+          if (tab === 'convert') {
+            handleFilesAdded(files);
+          } else {
+            handleCompressUpload(files[0]);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [tab, handleFilesAdded, handleCompressUpload]);
 
   // Convert a single image
   const processConvertItem = async (item: FileItem): Promise<FileItem> => {
@@ -518,16 +560,6 @@ export default function ImageToolsPage() {
     });
   };
 
-  // Compress handler
-  const handleCompressUpload = (file: File) => {
-    setCompFile(file);
-    setCompResultUrl('');
-    setCompOrigSize(file.size);
-    const reader = new FileReader();
-    reader.onload = (e) => setCompPreview(e.target?.result as string);
-    reader.readAsDataURL(file);
-  };
-
   const compress = async () => {
     if (!compFile) return;
     setCompressing(true);
@@ -626,7 +658,11 @@ export default function ImageToolsPage() {
           >
             <div className="text-4xl mb-3 group-hover:scale-110 transition-transform">📂</div>
             <p className="text-sm font-medium text-[var(--foreground)]">
-              Drop images here, or <span className="underline underline-offset-4">browse files</span>
+              Drop images here, <span className="underline underline-offset-4">browse files</span>, or press{' '}
+              <kbd className="px-2 py-0.5 rounded bg-[var(--muted)] border border-[var(--card-border)] text-xs font-mono">
+                Ctrl + V
+              </kbd>{' '}
+              to paste
             </p>
             <p className="text-xs text-[var(--muted-text)] mt-1.5">
               Supports JPG, PNG, WEBP, AVIF, ICO, BMP, SVG, GIF (Batch convert supported)

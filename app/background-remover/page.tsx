@@ -1,5 +1,5 @@
 'use client';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
 export default function BackgroundRemoverPage() {
@@ -7,41 +7,70 @@ export default function BackgroundRemoverPage() {
   const [result, setResult] = useState<string>('');
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
+  const [progressPercent, setProgressPercent] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [imageName, setImageName] = useState('image');
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const processFile = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) return;
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
+      return;
+    }
+
     setResult('');
-    setProgress('Loading image...');
+    setErrorMessage('');
+    setProgress('Reading image data...');
+    setProgressPercent(5);
     setLoading(true);
+
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    setImageName(name || 'removed-bg');
 
     const reader = new FileReader();
     reader.onload = (e) => setOriginal(e.target?.result as string);
     reader.readAsDataURL(file);
 
     try {
-      setProgress('Loading AI model (first time may take ~30s)...');
-      // Dynamic import to avoid SSR/build-time issues
-      const bgRemoval = await import('@imgly/background-removal');
-      setProgress('Removing background...');
+      setProgress('Initializing AI model (First run may take a moment to download)...');
+      setProgressPercent(15);
 
-      const blob = await bgRemoval.removeBackground(file, {
-        progress: (_key: string, cur: number, total: number) => {
-          if (total > 0) setProgress(`Processing: ${Math.round((cur / total) * 100)}%`);
+      // Dynamically import @imgly/background-removal
+      const { removeBackground } = await import('@imgly/background-removal');
+
+      setProgress('Removing background...');
+      setProgressPercent(30);
+
+      const blob = await removeBackground(file, {
+        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+        progress: (key: string, current: number, total: number) => {
+          if (total > 0) {
+            const percent = Math.min(95, Math.round((current / total) * 100));
+            setProgressPercent(percent);
+            setProgress(`Processing AI model (${percent}%)...`);
+          }
         },
         debug: false,
       });
+
       const url = URL.createObjectURL(blob);
       setResult(url);
+      setProgressPercent(100);
       setProgress('');
-    } catch (err) {
-      console.error(err);
-      setProgress('Error removing background. Try a different image.');
+    } catch (err: unknown) {
+      console.error('Background removal failed:', err);
+      setErrorMessage(
+        err instanceof Error
+          ? `Error: ${err.message}. Please try again or use another image.`
+          : 'Background removal failed. Please try a different image.'
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
+  // Drag & drop handlers
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
@@ -49,76 +78,156 @@ export default function BackgroundRemoverPage() {
     if (file) processFile(file);
   };
 
+  // Clipboard Paste (Ctrl+V) handler
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      if (e.clipboardData && e.clipboardData.items) {
+        const items = Array.from(e.clipboardData.items);
+        for (const item of items) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+              e.preventDefault();
+              processFile(file);
+              break;
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [processFile]);
+
   return (
-    <ToolPageWrapper title="Background Remover" description="AI-powered background removal — runs 100% in your browser" emoji="✂️">
-      <div className="space-y-6">
-        {/* Upload zone */}
+    <ToolPageWrapper
+      title="Background Remover"
+      description="AI-powered background removal running 100% locally in your browser"
+      emoji="✂️"
+    >
+      <div className="max-w-4xl mx-auto space-y-8">
+        {/* Upload Zone */}
         <div
-          className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
-            dragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-[var(--card-border)] hover:border-[var(--muted-text)]'
+          className={`drop-zone py-12 transition-all ${
+            dragging ? 'border-[var(--foreground)] bg-[var(--muted)]' : ''
           }`}
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragging(true);
+          }}
           onDragLeave={() => setDragging(false)}
           onDrop={handleDrop}
-          onClick={() => document.getElementById('bg-file-input')?.click()}
+          onClick={() => fileInputRef.current?.click()}
         >
-          <div className="text-5xl mb-3">✂️</div>
-          <p className="text-[var(--muted-text)] font-medium">Drop image here or click to upload</p>
-          <p className="text-[var(--muted-text)] text-sm mt-1">PNG, JPG, WebP — processed locally</p>
+          <div className="text-4xl mb-3">✂️</div>
+          <p className="text-sm font-medium text-[var(--foreground)]">
+            Drop image here, <span className="underline underline-offset-4">browse file</span>, or press{' '}
+            <kbd className="px-2 py-0.5 rounded bg-[var(--muted)] border border-[var(--card-border)] text-xs font-mono">
+              Ctrl + V
+            </kbd>{' '}
+            to paste
+          </p>
+          <p className="text-xs text-[var(--muted-text)] mt-1.5">
+            PNG, JPG, WebP supported • Processed entirely on your device with WebAssembly AI
+          </p>
           <input
-            id="bg-file-input"
+            ref={fileInputRef}
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) processFile(f); }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) processFile(f);
+            }}
           />
         </div>
 
-        {/* Loading state */}
+        {/* Loading / Progress State */}
         {loading && (
-          <div className="tool-card p-6 text-center">
-            <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-[var(--foreground)] font-medium">{progress}</p>
-            <p className="text-[var(--muted-text)] text-xs mt-2">Powered by @imgly/background-removal (WASM)</p>
+          <div className="tool-card p-6 text-center space-y-3">
+            <div className="w-10 h-10 border-3 border-[var(--card-border)] border-t-[var(--foreground)] rounded-full animate-spin mx-auto" />
+            <div>
+              <p className="text-sm font-medium text-[var(--foreground)]">{progress}</p>
+              <div className="w-full max-w-xs bg-[var(--card-border)] h-1.5 rounded-full mx-auto mt-3 overflow-hidden">
+                <div
+                  className="bg-[var(--foreground)] h-full transition-all duration-300 rounded-full"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+            <p className="text-[11px] text-[var(--muted-text)]">
+              Powered by @imgly AI WebAssembly • No data is uploaded to any server
+            </p>
           </div>
         )}
 
-        {/* Before / After */}
+        {/* Error Message */}
+        {errorMessage && (
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
+            {errorMessage}
+          </div>
+        )}
+
+        {/* Before / After Preview */}
         {(original || result) && !loading && (
           <div className="grid md:grid-cols-2 gap-6">
             {original && (
-              <div className="tool-card p-4">
-                <h3 className="text-sm font-semibold text-[var(--muted-text)] mb-3">Original</h3>
-                <img src={original} alt="Original" className="w-full rounded-xl object-contain max-h-80" />
+              <div className="tool-card p-4 space-y-3">
+                <div className="flex justify-between items-center text-xs font-medium text-[var(--muted-text)]">
+                  <span>Original Image</span>
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={original}
+                  alt="Original"
+                  className="w-full rounded-lg object-contain max-h-80 bg-[var(--muted)] border border-[var(--card-border)]"
+                />
               </div>
             )}
+
             {result && (
-              <div className="tool-card p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-sm font-semibold text-green-400">✅ Background Removed</h3>
-                  <a href={result} download="removed-bg.png" className="btn-primary text-xs px-3 py-1">⬇ Download PNG</a>
+              <div className="tool-card p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-green-500">✅ Background Removed</span>
+                  <a
+                    href={result}
+                    download={`${imageName}-no-bg.png`}
+                    className="btn-primary text-xs py-1.5 px-3 font-medium"
+                  >
+                    ⬇ Download PNG
+                  </a>
                 </div>
-                {/* Checkered background to show transparency */}
+
+                {/* Transparency Preview Background */}
                 <div
-                  className="w-full rounded-xl overflow-hidden max-h-80 flex items-center justify-center"
-                  style={{ background: 'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%) 0 0 / 20px 20px' }}
+                  className="w-full rounded-lg overflow-hidden max-h-80 flex items-center justify-center border border-[var(--card-border)]"
+                  style={{
+                    background:
+                      'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
+                  }}
                 >
-                  <img src={result} alt="Result" className="max-h-80 object-contain" />
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={result} alt="Background Removed" className="max-h-80 object-contain" />
                 </div>
               </div>
             )}
           </div>
         )}
 
-        <div className="tool-card p-4 flex gap-3">
-          <span className="text-blue-400">ℹ️</span>
-          <p className="text-sm text-[var(--muted-text)]">
-            Background removal runs entirely in your browser using WebAssembly. The first run downloads a ~40MB AI model which is then cached. No images are uploaded to any server.
+        {/* Privacy Info Note */}
+        <div className="tool-card p-4 flex items-center gap-3 text-xs text-[var(--muted-text)]">
+          <span className="text-base">🔒</span>
+          <p>
+            100% Privacy Guaranteed: All image processing and neural network AI execution happen directly in your browser. Your images never leave your machine.
           </p>
         </div>
       </div>
     </ToolPageWrapper>
   );
 }
-
-

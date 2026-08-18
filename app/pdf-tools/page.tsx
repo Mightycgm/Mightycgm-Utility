@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
 type Tab = 'merge' | 'split' | 'to-image' | 'img-to-pdf';
@@ -130,6 +130,35 @@ export default function PdfToolsPage() {
     setBuildingPdf(false);
   };
 
+  // Clipboard Paste (Ctrl+V) handler
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      if (e.clipboardData && e.clipboardData.items) {
+        const imageFiles: File[] = [];
+        for (const item of Array.from(e.clipboardData.items)) {
+          if (item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) imageFiles.push(file);
+          }
+        }
+
+        if (imageFiles.length > 0) {
+          e.preventDefault();
+          setImgFiles((prev) => [...prev, ...imageFiles]);
+          setTab('img-to-pdf');
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
+
   const TABS: { key: Tab; label: string }[] = [
     { key: 'merge', label: '⊕ Merge PDFs' },
     { key: 'split', label: '✂ Split PDF' },
@@ -252,12 +281,25 @@ export default function PdfToolsPage() {
       {/* Images → PDF */}
       {tab === 'img-to-pdf' && (
         <div className="space-y-5">
-          <div className="border-2 border-dashed border-[var(--card-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--muted-text)]"
-            onClick={() => document.getElementById('img-pdf-input')?.click()}>
+          <div
+            className="drop-zone py-10"
+            onClick={() => document.getElementById('img-pdf-input')?.click()}
+          >
             <div className="text-4xl mb-2">📄</div>
-            <p className="text-[var(--muted-text)]">{imgFiles.length > 0 ? `${imgFiles.length} image(s) selected` : 'Click to select images (PNG/JPG)'}</p>
-            <input id="img-pdf-input" type="file" accept="image/png,image/jpeg" multiple className="hidden"
-              onChange={e => setImgFiles(Array.from(e.target.files || []))} />
+            <p className="text-sm font-medium text-[var(--foreground)]">
+              {imgFiles.length > 0
+                ? `${imgFiles.length} image(s) selected`
+                : 'Click to select images (PNG/JPG), or press Ctrl + V to paste'}
+            </p>
+            <p className="text-xs text-[var(--muted-text)] mt-1">Combine multiple images into a single PDF</p>
+            <input
+              id="img-pdf-input"
+              type="file"
+              accept="image/png,image/jpeg"
+              multiple
+              className="hidden"
+              onChange={(e) => setImgFiles(Array.from(e.target.files || []))}
+            />
           </div>
           {imgFiles.length > 0 && (
             <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
