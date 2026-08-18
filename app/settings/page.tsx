@@ -32,12 +32,12 @@ export default function SettingsPage() {
             <span className="text-2xl">🔑</span>
             <div>
               <h2 className="font-semibold text-white">JSONBin.io API Key</h2>
-              <p className="text-sm text-gray-500">Required for Text Share and Log Share features</p>
+              <p className="text-sm text-[var(--muted-text)]">Required for Text Share and Log Share features</p>
             </div>
           </div>
 
           <div className="space-y-3">
-            <label className="text-sm text-gray-400 block">API Key (Master Key)</label>
+            <label className="text-sm text-[var(--muted-text)] block">API Key (Master Key)</label>
             <input
               className="input-field font-mono text-sm"
               type="password"
@@ -59,15 +59,15 @@ export default function SettingsPage() {
           </div>
 
           <div className="bg-gray-800/50 rounded-xl p-4 space-y-2">
-            <h3 className="text-sm font-semibold text-indigo-400">How to get a free API key:</h3>
-            <ol className="text-sm text-gray-400 space-y-1 list-decimal list-inside">
-              <li>Go to <a href="https://jsonbin.io" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline">jsonbin.io</a></li>
+            <h3 className="text-sm font-semibold text-[var(--foreground)]">How to get a free API key:</h3>
+            <ol className="text-sm text-[var(--muted-text)] space-y-1 list-decimal list-inside">
+              <li>Go to <a href="https://jsonbin.io" target="_blank" rel="noopener noreferrer" className="text-[var(--foreground)] hover:underline">jsonbin.io</a></li>
               <li>Create a free account</li>
-              <li>Go to <strong className="text-gray-300">API Keys</strong> section</li>
-              <li>Copy your <strong className="text-gray-300">Master Key</strong></li>
+              <li>Go to <strong className="text-[var(--foreground)]">API Keys</strong> section</li>
+              <li>Copy your <strong className="text-[var(--foreground)]">Master Key</strong></li>
               <li>Paste it above and click Save</li>
             </ol>
-            <p className="text-xs text-gray-600 mt-2">
+            <p className="text-xs text-[var(--muted-text)] mt-2">
               ℹ️ Your API key is stored only in your browser&apos;s localStorage and never sent to any server other than JSONBin.io.
             </p>
           </div>
@@ -79,7 +79,7 @@ export default function SettingsPage() {
             <span className="text-2xl">🔒</span>
             <h2 className="font-semibold text-white">Privacy</h2>
           </div>
-          <div className="space-y-2 text-sm text-gray-400">
+          <div className="space-y-2 text-sm text-[var(--muted-text)]">
             {[
               ['Background Remover', 'Runs entirely in your browser (WASM). Images never uploaded.'],
               ['PDF Tools', 'All PDF processing is client-side. Files never leave your device.'],
@@ -90,7 +90,7 @@ export default function SettingsPage() {
             ].map(([tool, desc]) => (
               <div key={tool} className="flex gap-3">
                 <span className="text-green-400 mt-0.5">✓</span>
-                <div><strong className="text-gray-300">{tool}:</strong> {desc}</div>
+                <div><strong className="text-[var(--foreground)]">{tool}:</strong> {desc}</div>
               </div>
             ))}
           </div>
@@ -99,3 +99,5 @@ export default function SettingsPage() {
     </ToolPageWrapper>
   );
 }
+
+

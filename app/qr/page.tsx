@@ -60,7 +60,7 @@ export default function QRPage() {
       <div className="flex gap-2 mb-8">
         {(['generate', 'decode'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl font-medium text-sm capitalize transition-all ${
+            className={`px-5 py-2 rounded-md font-medium text-sm capitalize transition-all ${
               tab === t ? 'btn-primary' : 'btn-secondary'
             }`}>{t}</button>
         ))}
@@ -70,7 +70,7 @@ export default function QRPage() {
         <div className="grid md:grid-cols-2 gap-8">
           <div className="space-y-4">
             <div>
-              <label className="text-sm text-gray-400 mb-2 block">Text or URL</label>
+              <label className="text-sm text-[var(--muted-text)] mb-2 block">Text or URL</label>
               <textarea
                 className="textarea-field"
                 placeholder="Enter text, URL, email, phone..."
@@ -80,10 +80,10 @@ export default function QRPage() {
               />
             </div>
             <div>
-              <label className="text-sm text-gray-400 mb-2 block">Size: {genSize}px</label>
+              <label className="text-sm text-[var(--muted-text)] mb-2 block">Size: {genSize}px</label>
               <input type="range" min={128} max={512} step={64} value={genSize}
                 onChange={e => setGenSize(+e.target.value)}
-                className="w-full accent-indigo-500" />
+                className="w-full accent-[var(--accent)]" />
             </div>
             <button className="btn-primary w-full py-3" onClick={generateQR}>Generate QR Code</button>
           </div>
@@ -91,11 +91,11 @@ export default function QRPage() {
             {genQR ? (
               <div className="space-y-4 text-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={genQR} alt="QR Code" className="rounded-2xl mx-auto" style={{ width: Math.min(genSize, 280), height: Math.min(genSize, 280) }} />
+            <img src={genQR} alt="QR Code" className="rounded-xl mx-auto" style={{ width: Math.min(genSize, 280), height: Math.min(genSize, 280) }} />
                 <a href={genQR} download="qrcode.png" className="btn-secondary inline-block px-6">? Download PNG</a>
               </div>
             ) : (
-              <div className="w-full h-64 border-2 border-dashed border-gray-700 rounded-2xl flex items-center justify-center text-gray-600">
+              <div className="w-full h-64 border-2 border-dashed border-[var(--card-border)] rounded-xl flex items-center justify-center text-[var(--muted-text)]">
                 QR preview will appear here
               </div>
             )}
@@ -106,8 +106,8 @@ export default function QRPage() {
       {tab === 'decode' && (
         <div className="space-y-6">
           <div
-            className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all ${
-              decDragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 hover:border-gray-600'
+            className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
+              decDragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-[var(--card-border)] hover:border-[var(--muted-text)]'
             }`}
             onDragOver={e => { e.preventDefault(); setDecDragging(true); }}
             onDragLeave={() => setDecDragging(false)}
@@ -115,8 +115,8 @@ export default function QRPage() {
             onClick={() => fileRef.current?.click()}
           >
             <div className="text-5xl mb-3">??</div>
-            <p className="text-gray-400 font-medium">Drop QR image here or click to upload</p>
-            <p className="text-gray-600 text-sm mt-1">PNG, JPG, WebP supported</p>
+            <p className="text-[var(--muted-text)] font-medium">Drop QR image here or click to upload</p>
+            <p className="text-[var(--muted-text)] text-sm mt-1">PNG, JPG, WebP supported</p>
             <input ref={fileRef} type="file" accept="image/*" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) decodeFile(f); }} />
           </div>
@@ -126,9 +126,9 @@ export default function QRPage() {
                 <h3 className="font-semibold text-green-400">? Decoded Successfully</h3>
                 <button className="btn-secondary text-xs px-3 py-1" onClick={() => navigator.clipboard.writeText(decResult)}>Copy</button>
               </div>
-              <p className="text-sm font-mono bg-gray-800 p-3 rounded-lg break-all text-gray-300">{decResult}</p>
+              <p className="text-sm font-mono bg-gray-800 p-3 rounded-lg break-all text-[var(--foreground)]">{decResult}</p>
               {decResult.startsWith('http') && (
-                <a href={decResult} target="_blank" rel="noopener noreferrer" className="text-indigo-400 text-sm hover:underline">?? Open Link ?</a>
+                <a href={decResult} target="_blank" rel="noopener noreferrer" className="text-[var(--foreground)] text-sm hover:underline">?? Open Link ?</a>
               )}
             </div>
           )}
@@ -138,3 +138,5 @@ export default function QRPage() {
     </ToolPageWrapper>
   );
 }
+
+

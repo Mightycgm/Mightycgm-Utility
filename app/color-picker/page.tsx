@@ -177,7 +177,7 @@ export default function ColorPickerPage() {
           </div>
 
           <div 
-            className="w-full rounded-2xl h-24 shadow-sm border border-[var(--card-border)] relative overflow-hidden bg-white dark:bg-gray-100" 
+            className="w-full rounded-xl h-24 shadow-sm border border-[var(--card-border)] relative overflow-hidden bg-white dark:bg-gray-100" 
           >
             <div className="absolute inset-0" style={{ background: `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${hsla.a})` }} />
           </div>
@@ -280,3 +280,4 @@ export default function ColorPickerPage() {
     </ToolPageWrapper>
   );
 }
+

@@ -54,8 +54,8 @@ export default function BackgroundRemoverPage() {
       <div className="space-y-6">
         {/* Upload zone */}
         <div
-          className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all ${
-            dragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-gray-700 hover:border-gray-600'
+          className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-all ${
+            dragging ? 'border-indigo-500 bg-indigo-900/20' : 'border-[var(--card-border)] hover:border-[var(--muted-text)]'
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
@@ -63,8 +63,8 @@ export default function BackgroundRemoverPage() {
           onClick={() => document.getElementById('bg-file-input')?.click()}
         >
           <div className="text-5xl mb-3">✂️</div>
-          <p className="text-gray-400 font-medium">Drop image here or click to upload</p>
-          <p className="text-gray-600 text-sm mt-1">PNG, JPG, WebP — processed locally</p>
+          <p className="text-[var(--muted-text)] font-medium">Drop image here or click to upload</p>
+          <p className="text-[var(--muted-text)] text-sm mt-1">PNG, JPG, WebP — processed locally</p>
           <input
             id="bg-file-input"
             type="file"
@@ -78,8 +78,8 @@ export default function BackgroundRemoverPage() {
         {loading && (
           <div className="tool-card p-6 text-center">
             <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-            <p className="text-indigo-300 font-medium">{progress}</p>
-            <p className="text-gray-600 text-xs mt-2">Powered by @imgly/background-removal (WASM)</p>
+            <p className="text-[var(--foreground)] font-medium">{progress}</p>
+            <p className="text-[var(--muted-text)] text-xs mt-2">Powered by @imgly/background-removal (WASM)</p>
           </div>
         )}
 
@@ -88,7 +88,7 @@ export default function BackgroundRemoverPage() {
           <div className="grid md:grid-cols-2 gap-6">
             {original && (
               <div className="tool-card p-4">
-                <h3 className="text-sm font-semibold text-gray-400 mb-3">Original</h3>
+                <h3 className="text-sm font-semibold text-[var(--muted-text)] mb-3">Original</h3>
                 <img src={original} alt="Original" className="w-full rounded-xl object-contain max-h-80" />
               </div>
             )}
@@ -112,7 +112,7 @@ export default function BackgroundRemoverPage() {
 
         <div className="tool-card p-4 flex gap-3">
           <span className="text-blue-400">ℹ️</span>
-          <p className="text-sm text-gray-400">
+          <p className="text-sm text-[var(--muted-text)]">
             Background removal runs entirely in your browser using WebAssembly. The first run downloads a ~40MB AI model which is then cached. No images are uploaded to any server.
           </p>
         </div>
@@ -120,3 +120,5 @@ export default function BackgroundRemoverPage() {
     </ToolPageWrapper>
   );
 }
+
+

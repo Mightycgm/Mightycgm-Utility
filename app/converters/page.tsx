@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { useState } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
@@ -72,11 +72,11 @@ export default function ConvertersPage() {
   };
 
   return (
-    <ToolPageWrapper title="Converters" description="Unit, number base & timestamp converter" emoji="🔄">
+    <ToolPageWrapper title="Converters" description="Unit, number base & timestamp converter" emoji="??">
       <div className="flex gap-2 mb-8">
         {(['unit', 'base', 'timestamp'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl font-medium text-sm capitalize ${ tab === t ? 'btn-primary' : 'btn-secondary' }`}>
+            className={`px-5 py-2 rounded-md font-medium text-sm capitalize ${ tab === t ? 'btn-primary' : 'btn-secondary' }`}>
             {t === 'unit' ? 'Unit' : t === 'base' ? 'Number Base' : 'Timestamp'}
           </button>
         ))}
@@ -92,24 +92,24 @@ export default function ConvertersPage() {
           </div>
           <div className="grid md:grid-cols-3 gap-4 items-end">
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Value</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Value</label>
               <input className="input-field" type="number" value={unitVal} onChange={e => setUnitVal(e.target.value)} placeholder="Enter value" />
             </div>
             <div>
-              <label className="text-sm text-gray-400 block mb-2">From</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">From</label>
               <select className="input-field" value={fromUnit} onChange={e => setFromUnit(e.target.value)}>
                 {unitKeys.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-sm text-gray-400 block mb-2">To</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">To</label>
               <select className="input-field" value={toUnit} onChange={e => setToUnit(e.target.value)}>
                 {unitKeys.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
           </div>
           <button className="btn-primary" onClick={convertUnit}>Convert</button>
-          {unitResult && <div className="tool-card p-4 text-lg font-semibold text-indigo-300">{unitResult}</div>}
+          {unitResult && <div className="tool-card p-4 text-lg font-semibold text-[var(--foreground)] font-mono">{unitResult}</div>}
         </div>
       )}
 
@@ -117,11 +117,11 @@ export default function ConvertersPage() {
         <div className="space-y-4">
           <div className="grid md:grid-cols-2 gap-4 items-end">
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Input</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Input</label>
               <input className="input-field font-mono" value={baseInput} onChange={e => setBaseInput(e.target.value)} placeholder="Enter number..." />
             </div>
             <div>
-              <label className="text-sm text-gray-400 block mb-2">From Base</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">From Base</label>
               <select className="input-field" value={baseFrom} onChange={e => setBaseFrom(+e.target.value)}>
                 <option value={2}>Binary (2)</option>
                 <option value={8}>Octal (8)</option>
@@ -135,8 +135,8 @@ export default function ConvertersPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[['Binary', 'bin', 2], ['Octal', 'oct', 8], ['Decimal', 'dec', 10], ['Hexadecimal', 'hex', 16]].map(([label, key, base]) => (
                 <div key={key as string} className="tool-card p-4">
-                  <div className="text-xs text-gray-500 mb-1">{label} (base {base})</div>
-                  <div className="font-mono text-sm text-indigo-300 break-all">{baseResults[key as string] || '-'}</div>
+                  <div className="text-xs text-[var(--muted-text)] mb-1">{label} (base {base})</div>
+                  <div className="font-mono text-sm text-[var(--foreground)] font-mono break-all">{baseResults[key as string] || '-'}</div>
                 </div>
               ))}
             </div>
@@ -147,7 +147,7 @@ export default function ConvertersPage() {
       {tab === 'timestamp' && (
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Unix timestamp or Date string</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Unix timestamp or Date string</label>
             <div className="flex gap-3">
               <input className="input-field" value={tsInput} onChange={e => setTsInput(e.target.value)}
                 placeholder="1700000000 or 2024-01-15T10:30:00Z" />
@@ -156,10 +156,11 @@ export default function ConvertersPage() {
             </div>
           </div>
           {tsResult && (
-            <pre className="tool-card p-4 font-mono text-sm text-indigo-300 whitespace-pre-wrap">{tsResult}</pre>
+            <pre className="tool-card p-4 font-mono text-sm text-[var(--foreground)] font-mono whitespace-pre-wrap">{tsResult}</pre>
           )}
         </div>
       )}
     </ToolPageWrapper>
   );
 }
+

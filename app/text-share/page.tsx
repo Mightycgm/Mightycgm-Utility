@@ -93,7 +93,7 @@ export default function TextSharePage() {
       <div className="flex gap-2 mb-8">
         {(['share', 'retrieve'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl font-medium text-sm capitalize ${tab === t ? 'btn-primary' : 'btn-secondary'}`}>
+            className={`px-5 py-2 rounded-md font-medium text-sm capitalize ${tab === t ? 'btn-primary' : 'btn-secondary'}`}>
             {t === 'share' ? '📤 Share Text' : '📥 Retrieve Text'}
           </button>
         ))}
@@ -102,14 +102,14 @@ export default function TextSharePage() {
       {tab === 'share' && (
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Title (optional)</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Title (optional)</label>
             <input className="input-field" value={title} onChange={e => setTitle(e.target.value)} placeholder="My Note..." />
           </div>
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Text Content</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Text Content</label>
             <textarea className="textarea-field" style={{ minHeight: '300px' }} value={text}
               onChange={e => setText(e.target.value)} placeholder="Paste your long text here..." />
-            <div className="text-xs text-gray-600 mt-1 text-right">{text.length.toLocaleString()} characters</div>
+            <div className="text-xs text-[var(--muted-text)] mt-1 text-right">{text.length.toLocaleString()} characters</div>
           </div>
           <button className="btn-primary w-full py-3" onClick={share} disabled={loading}>
             {loading ? 'Creating link...' : '🔗 Create Share Link'}
@@ -128,8 +128,8 @@ export default function TextSharePage() {
           )}
           <div className="tool-card p-4 flex gap-3">
             <span className="text-blue-400">ℹ️</span>
-            <p className="text-sm text-gray-400">
-              Requires a free JSONBin.io API key. <a href="/settings" className="text-indigo-400 hover:underline">Set it in Settings →</a>
+            <p className="text-sm text-[var(--muted-text)]">
+              Requires a free JSONBin.io API key. <a href="/settings" className="text-[var(--foreground)] hover:underline">Set it in Settings →</a>
             </p>
           </div>
         </div>
@@ -138,7 +138,7 @@ export default function TextSharePage() {
       {tab === 'retrieve' && (
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Share Link or Bin ID</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Share Link or Bin ID</label>
             <div className="flex gap-3">
               <input className="input-field font-mono" value={retrieveId} onChange={e => setRetrieveId(e.target.value)}
                 placeholder="Paste share link or bin ID..." />
@@ -154,7 +154,7 @@ export default function TextSharePage() {
               <div className="flex justify-end">
                 <button className="btn-secondary text-sm" onClick={() => copy(retrieved.text)}>Copy Text</button>
               </div>
-              <pre className="font-mono text-sm text-gray-300 whitespace-pre-wrap bg-gray-800 p-4 rounded-xl max-h-96 overflow-y-auto scrollbar-thin">
+              <pre className="font-mono text-sm text-[var(--foreground)] whitespace-pre-wrap bg-gray-800 p-4 rounded-xl max-h-96 overflow-y-auto scrollbar-thin">
                 {retrieved.text}
               </pre>
             </div>
@@ -164,3 +164,5 @@ export default function TextSharePage() {
     </ToolPageWrapper>
   );
 }
+
+

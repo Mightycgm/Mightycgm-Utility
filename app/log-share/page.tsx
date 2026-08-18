@@ -77,7 +77,7 @@ export default function LogSharePage() {
       <div className="flex gap-2 mb-8">
         {(['share', 'view'] as const).map(t => (
           <button key={t} onClick={() => setTab(t)}
-            className={`px-5 py-2 rounded-xl font-medium text-sm ${tab === t ? 'btn-primary' : 'btn-secondary'}`}>
+            className={`px-5 py-2 rounded-md font-medium text-sm ${tab === t ? 'btn-primary' : 'btn-secondary'}`}>
             {t === 'share' ? '📤 Share Log' : '📥 View Log'}
           </button>
         ))}
@@ -87,18 +87,18 @@ export default function LogSharePage() {
         <div className="space-y-4">
           <div className="grid md:grid-cols-2 gap-4">
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Title</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Title</label>
               <input className="input-field" value={title} onChange={e => setTitle(e.target.value)} placeholder="My Log..." />
             </div>
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Language</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Language</label>
               <select className="input-field" value={language} onChange={e => setLanguage(e.target.value)}>
                 {LANGUAGES.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Code / Log</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Code / Log</label>
             <textarea className="textarea-field font-mono text-xs" style={{ minHeight: '350px' }}
               value={code} onChange={e => setCode(e.target.value)} placeholder="Paste code or log output here..." />
           </div>
@@ -107,15 +107,15 @@ export default function LogSharePage() {
           {code && (
             <div className="tool-card p-4">
               <div className="flex justify-between items-center mb-3">
-                <span className="text-xs text-gray-500 font-mono">{language}</span>
-                <button className="text-xs text-gray-500 hover:text-indigo-400" onClick={() => copy(code)}>Copy code</button>
+                <span className="text-xs text-[var(--muted-text)] font-mono">{language}</span>
+                <button className="text-xs text-[var(--muted-text)] hover:text-[var(--foreground)]" onClick={() => copy(code)}>Copy code</button>
               </div>
               <Highlight theme={themes.vsDark} code={code} language={language as Parameters<typeof Highlight>[0]['language']}>
                 {({ className, style, tokens, getLineProps, getTokenProps }) => (
                   <pre className="font-mono text-xs overflow-auto max-h-64 scrollbar-thin rounded-lg p-4" style={style}>
                     {tokens.map((line, i) => (
                       <div key={i} {...getLineProps({ line })}>
-                        <span className="select-none text-gray-600 mr-4">{String(i + 1).padStart(3)}</span>
+                        <span className="select-none text-[var(--muted-text)] mr-4">{String(i + 1).padStart(3)}</span>
                         {line.map((token, j) => <span key={j} {...getTokenProps({ token })} />)}
                       </div>
                     ))}
@@ -146,7 +146,7 @@ export default function LogSharePage() {
       {tab === 'view' && (
         <div className="space-y-4">
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Share Link or Bin ID</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Share Link or Bin ID</label>
             <div className="flex gap-3">
               <input className="input-field font-mono" value={retrieveId} onChange={e => setRetrieveId(e.target.value)} placeholder="Paste link or bin ID..." />
               <button className="btn-primary px-6" onClick={() => retrieve()} disabled={retrieving}>
@@ -159,7 +159,7 @@ export default function LogSharePage() {
             <div className="tool-card p-5 space-y-3">
               {retrieved.title && <h3 className="font-semibold text-white">{retrieved.title}</h3>}
               <div className="flex justify-between items-center">
-                <span className="text-xs font-mono text-gray-500">{retrieved.language}</span>
+                <span className="text-xs font-mono text-[var(--muted-text)]">{retrieved.language}</span>
                 <button className="btn-secondary text-sm" onClick={() => copy(retrieved.code)}>Copy Code</button>
               </div>
               <Highlight theme={themes.vsDark} code={retrieved.code} language={retrieved.language as Parameters<typeof Highlight>[0]['language']}>
@@ -167,7 +167,7 @@ export default function LogSharePage() {
                   <pre className="font-mono text-xs overflow-auto max-h-[60vh] scrollbar-thin rounded-lg p-4" style={style}>
                     {tokens.map((line, i) => (
                       <div key={i} {...getLineProps({ line })}>
-                        <span className="select-none text-gray-600 mr-4">{String(i + 1).padStart(3)}</span>
+                        <span className="select-none text-[var(--muted-text)] mr-4">{String(i + 1).padStart(3)}</span>
                         {line.map((token, j) => <span key={j} {...getTokenProps({ token })} />)}
                       </div>
                     ))}
@@ -181,3 +181,5 @@ export default function LogSharePage() {
     </ToolPageWrapper>
   );
 }
+
+

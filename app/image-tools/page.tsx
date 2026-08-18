@@ -93,14 +93,20 @@ export default function ImageToolsPage() {
           </div>
           {origFile && (
             <div className="grid md:grid-cols-2 gap-6">
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm text-gray-400">Quality: {Math.round(quality * 100)}%</label>
-                  <input type="range" min={0.1} max={1} step={0.05} value={quality} onChange={e => setQuality(+e.target.value)} className="w-full mt-2 accent-indigo-500" />
+              <div className="space-y-5">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[var(--muted-text)] font-medium">Quality</span>
+                    <span className="font-semibold tabular-nums">{Math.round(quality * 100)}%</span>
+                  </div>
+                  <input type="range" min={0.1} max={1} step={0.05} value={quality} onChange={e => setQuality(+e.target.value)} className="app-slider" />
                 </div>
-                <div>
-                  <label className="text-sm text-gray-400">Max Width: {maxWidth}px</label>
-                  <input type="range" min={640} max={4096} step={320} value={maxWidth} onChange={e => setMaxWidth(+e.target.value)} className="w-full mt-2 accent-indigo-500" />
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-[var(--muted-text)] font-medium">Max Width</span>
+                    <span className="font-semibold tabular-nums">{maxWidth}px</span>
+                  </div>
+                  <input type="range" min={640} max={4096} step={320} value={maxWidth} onChange={e => setMaxWidth(+e.target.value)} className="app-slider" />
                 </div>
                 <button className="btn-primary w-full py-3" onClick={compress} disabled={compressing}>
                   {compressing ? 'Compressing...' : 'Compress Image'}

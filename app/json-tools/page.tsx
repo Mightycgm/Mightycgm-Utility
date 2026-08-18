@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 import { useState } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
@@ -17,7 +17,7 @@ export default function JsonToolsPage() {
     catch (e: unknown) { setError((e as Error).message); setOutput(''); }
   };
   const validate = () => {
-    try { JSON.parse(input); setError(''); setOutput('✅ Valid JSON!'); }
+    try { JSON.parse(input); setError(''); setOutput('? Valid JSON!'); }
     catch (e: unknown) { setError((e as Error).message); setOutput(''); }
   };
 
@@ -29,16 +29,16 @@ export default function JsonToolsPage() {
           <button className="btn-secondary" onClick={minify}>Minify</button>
           <button className="btn-secondary" onClick={validate}>Validate</button>
           <div className="ml-auto flex items-center gap-2">
-            <label className="text-sm text-gray-400">Indent:</label>
+            <label className="text-sm text-[var(--muted-text)]">Indent:</label>
             {[2, 4].map(n => (
               <button key={n} onClick={() => setIndent(n)}
-                className={`px-3 py-1 rounded-lg text-sm ${ indent === n ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-400' }`}>{n}</button>
+                className={`px-3 py-1 rounded-lg text-sm ${ indent === n ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-[var(--muted-text)]' }`}>{n}</button>
             ))}
           </div>
         </div>
         <div className="grid md:grid-cols-2 gap-4">
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Input JSON</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Input JSON</label>
             <textarea
               className="textarea-field font-mono text-xs"
               style={{ minHeight: '400px' }}
@@ -49,8 +49,8 @@ export default function JsonToolsPage() {
           </div>
           <div>
             <div className="flex items-center justify-between mb-2">
-              <label className="text-sm text-gray-400">Output</label>
-              {output && <button className="text-xs text-indigo-400 hover:underline" onClick={() => navigator.clipboard.writeText(output)}>Copy</button>}
+              <label className="text-sm text-[var(--muted-text)]">Output</label>
+              {output && <button className="text-xs text-[var(--foreground)] hover:underline" onClick={() => navigator.clipboard.writeText(output)}>Copy</button>}
             </div>
             {error ? (
               <div className="tool-card border-red-900/50 p-4 h-full rounded-xl">
@@ -70,3 +70,5 @@ export default function JsonToolsPage() {
     </ToolPageWrapper>
   );
 }
+
+

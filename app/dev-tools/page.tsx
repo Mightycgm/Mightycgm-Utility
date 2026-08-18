@@ -108,7 +108,7 @@ export default function DevToolsPage() {
       <div className="flex flex-wrap gap-2 mb-8">
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 rounded-xl font-medium text-sm transition-all ${tab === t.key ? 'btn-primary' : 'btn-secondary'}`}>
+            className={`px-4 py-2 rounded-md font-medium text-sm transition-all ${tab === t.key ? 'btn-primary' : 'btn-secondary'}`}>
             {t.label}
           </button>
         ))}
@@ -128,8 +128,8 @@ export default function DevToolsPage() {
           <button className="btn-primary" onClick={handleBase64}>{b64Mode === 'encode' ? 'Encode' : 'Decode'}</button>
           {b64Output && (
             <div className="tool-card p-4">
-              <div className="flex justify-between mb-2"><span className="text-sm text-gray-400">Result</span><button className="text-xs text-indigo-400 hover:underline" onClick={() => copy(b64Output)}>Copy</button></div>
-              <pre className="font-mono text-sm text-indigo-300 break-all whitespace-pre-wrap">{b64Output}</pre>
+              <div className="flex justify-between mb-2"><span className="text-sm text-[var(--muted-text)]">Result</span><button className="text-xs text-[var(--foreground)] hover:underline" onClick={() => copy(b64Output)}>Copy</button></div>
+              <pre className="font-mono text-sm text-[var(--foreground)] break-all whitespace-pre-wrap">{b64Output}</pre>
             </div>
           )}
         </div>
@@ -149,8 +149,8 @@ export default function DevToolsPage() {
           <button className="btn-primary" onClick={handleUrl}>{urlMode === 'encode' ? 'Encode' : 'Decode'}</button>
           {urlOutput && (
             <div className="tool-card p-4">
-              <div className="flex justify-between mb-2"><span className="text-sm text-gray-400">Result</span><button className="text-xs text-indigo-400 hover:underline" onClick={() => copy(urlOutput)}>Copy</button></div>
-              <pre className="font-mono text-sm text-indigo-300 break-all whitespace-pre-wrap">{urlOutput}</pre>
+              <div className="flex justify-between mb-2"><span className="text-sm text-[var(--muted-text)]">Result</span><button className="text-xs text-[var(--foreground)] hover:underline" onClick={() => copy(urlOutput)}>Copy</button></div>
+              <pre className="font-mono text-sm text-[var(--foreground)] break-all whitespace-pre-wrap">{urlOutput}</pre>
             </div>
           )}
         </div>
@@ -166,10 +166,10 @@ export default function DevToolsPage() {
               {Object.entries(hashResults).map(([algo, hash]) => (
                 <div key={algo} className="tool-card p-4">
                   <div className="flex justify-between mb-1">
-                    <span className="text-xs font-semibold text-indigo-400">{algo}</span>
-                    <button className="text-xs text-gray-500 hover:text-indigo-400" onClick={() => copy(hash)}>Copy</button>
+                    <span className="text-xs font-semibold text-[var(--foreground)]">{algo}</span>
+                    <button className="text-xs text-[var(--muted-text)] hover:text-[var(--foreground)]" onClick={() => copy(hash)}>Copy</button>
                   </div>
-                  <p className="font-mono text-xs text-gray-300 break-all">{hash}</p>
+                  <p className="font-mono text-xs text-[var(--foreground)] break-all">{hash}</p>
                 </div>
               ))}
             </div>
@@ -187,13 +187,13 @@ export default function DevToolsPage() {
             <div className="space-y-3">
               {[['Header', jwtDecoded.header], ['Payload', jwtDecoded.payload]].map(([label, data]) => (
                 <div key={label as string} className="tool-card p-4">
-                  <h4 className="text-xs font-semibold text-indigo-400 mb-2">{label as string}</h4>
-                  <pre className="font-mono text-xs text-gray-300 whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
+                  <h4 className="text-xs font-semibold text-[var(--foreground)] mb-2">{label as string}</h4>
+                  <pre className="font-mono text-xs text-[var(--foreground)] whitespace-pre-wrap">{JSON.stringify(data, null, 2)}</pre>
                 </div>
               ))}
               <div className="tool-card p-4">
                 <h4 className="text-xs font-semibold text-yellow-400 mb-2">Signature (not verified)</h4>
-                <p className="font-mono text-xs text-gray-500 break-all">{jwtDecoded.signature}</p>
+                <p className="font-mono text-xs text-[var(--muted-text)] break-all">{jwtDecoded.signature}</p>
               </div>
             </div>
           )}
@@ -205,8 +205,8 @@ export default function DevToolsPage() {
         <div className="space-y-4">
           <div className="flex gap-4 items-end">
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Count: {uuidCount}</label>
-              <input type="range" min={1} max={20} value={uuidCount} onChange={e => setUuidCount(+e.target.value)} className="accent-indigo-500" />
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Count: {uuidCount}</label>
+              <input type="range" min={1} max={20} value={uuidCount} onChange={e => setUuidCount(+e.target.value)} className="accent-[var(--accent)]" />
             </div>
             <button className="btn-primary" onClick={generateUUIDs}>Generate UUIDs</button>
             {uuids.length > 0 && (
@@ -217,8 +217,8 @@ export default function DevToolsPage() {
             <div className="space-y-2">
               {uuids.map((u, i) => (
                 <div key={i} className="tool-card p-3 flex justify-between items-center">
-                  <span className="font-mono text-sm text-indigo-300">{u}</span>
-                  <button className="text-xs text-gray-500 hover:text-indigo-400 ml-4" onClick={() => copy(u)}>Copy</button>
+                  <span className="font-mono text-sm text-[var(--foreground)]">{u}</span>
+                  <button className="text-xs text-[var(--muted-text)] hover:text-[var(--foreground)] ml-4" onClick={() => copy(u)}>Copy</button>
                 </div>
               ))}
             </div>
@@ -231,16 +231,16 @@ export default function DevToolsPage() {
         <div className="space-y-4">
           <div className="grid md:grid-cols-3 gap-3">
             <div className="md:col-span-2">
-              <label className="text-sm text-gray-400 block mb-2">Pattern</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Pattern</label>
               <input className="input-field font-mono" value={pattern} onChange={e => setPattern(e.target.value)} placeholder="e.g. \d+" />
             </div>
             <div>
-              <label className="text-sm text-gray-400 block mb-2">Flags</label>
+              <label className="text-sm text-[var(--muted-text)] block mb-2">Flags</label>
               <input className="input-field font-mono" value={flags} onChange={e => setFlags(e.target.value)} placeholder="g, i, m..." />
             </div>
           </div>
           <div>
-            <label className="text-sm text-gray-400 block mb-2">Test String</label>
+            <label className="text-sm text-[var(--muted-text)] block mb-2">Test String</label>
             <textarea className="textarea-field" rows={5} value={testStr} onChange={e => setTestStr(e.target.value)} placeholder="Text to test regex against..." />
           </div>
           <button className="btn-primary" onClick={testRegex}>Test Regex</button>
@@ -250,16 +250,18 @@ export default function DevToolsPage() {
               <p className="text-sm text-green-400 mb-3">✅ {regexMatches.length} match{regexMatches.length !== 1 ? 'es' : ''} found</p>
               <div className="flex flex-wrap gap-2">
                 {regexMatches.map((m, i) => (
-                  <span key={i} className="bg-indigo-900/40 border border-indigo-500/30 rounded-lg px-2 py-1 text-sm font-mono text-indigo-300">{m}</span>
+                  <span key={i} className="bg-indigo-900/40 border border-indigo-500/30 rounded-lg px-2 py-1 text-sm font-mono text-[var(--foreground)]">{m}</span>
                 ))}
               </div>
             </div>
           )}
           {!regexError && regexMatches.length === 0 && pattern && testStr && (
-            <p className="text-gray-500 text-sm">No matches found.</p>
+            <p className="text-[var(--muted-text)] text-sm">No matches found.</p>
           )}
         </div>
       )}
     </ToolPageWrapper>
   );
 }
+
+

@@ -142,7 +142,7 @@ export default function PdfToolsPage() {
       <div className="flex flex-wrap gap-2 mb-8">
         {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
-            className={`px-4 py-2 rounded-xl font-medium text-sm ${tab === t.key ? 'btn-primary' : 'btn-secondary'}`}>
+            className={`px-4 py-2 rounded-md font-medium text-sm ${tab === t.key ? 'btn-primary' : 'btn-secondary'}`}>
             {t.label}
           </button>
         ))}
@@ -151,10 +151,10 @@ export default function PdfToolsPage() {
       {/* Merge */}
       {tab === 'merge' && (
         <div className="space-y-5">
-          <div className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-gray-600"
+          <div className="border-2 border-dashed border-[var(--card-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--muted-text)]"
             onClick={() => document.getElementById('merge-input')?.click()}>
             <div className="text-4xl mb-2">📎</div>
-            <p className="text-gray-400">{mergeFiles.length > 0 ? `${mergeFiles.length} file(s) selected` : 'Click to select PDF files'}</p>
+            <p className="text-[var(--muted-text)]">{mergeFiles.length > 0 ? `${mergeFiles.length} file(s) selected` : 'Click to select PDF files'}</p>
             <input id="merge-input" type="file" accept=".pdf" multiple className="hidden"
               onChange={e => setMergeFiles(Array.from(e.target.files || []))} />
           </div>
@@ -162,7 +162,7 @@ export default function PdfToolsPage() {
             <div className="space-y-2">
               {mergeFiles.map((f, i) => (
                 <div key={i} className="tool-card p-3 flex justify-between items-center text-sm">
-                  <span className="text-gray-300">📄 {f.name}</span>
+                  <span className="text-[var(--foreground)]">📄 {f.name}</span>
                   <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setMergeFiles(prev => prev.filter((_, j) => j !== i))}>Remove</button>
                 </div>
               ))}
@@ -178,23 +178,23 @@ export default function PdfToolsPage() {
       {/* Split */}
       {tab === 'split' && (
         <div className="space-y-5">
-          <div className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-gray-600"
+          <div className="border-2 border-dashed border-[var(--card-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--muted-text)]"
             onClick={() => document.getElementById('split-input')?.click()}>
             <div className="text-4xl mb-2">✂️</div>
-            <p className="text-gray-400">{splitFile ? splitFile.name : 'Click to select a PDF'}</p>
-            {splitTotal > 0 && <p className="text-indigo-400 text-sm mt-1">{splitTotal} pages</p>}
+            <p className="text-[var(--muted-text)]">{splitFile ? splitFile.name : 'Click to select a PDF'}</p>
+            {splitTotal > 0 && <p className="text-[var(--foreground)] text-sm mt-1">{splitTotal} pages</p>}
             <input id="split-input" type="file" accept=".pdf" className="hidden"
               onChange={e => { const f = e.target.files?.[0]; if (f) loadSplitFile(f); }} />
           </div>
           {splitTotal > 0 && (
             <div className="flex gap-4 items-end">
               <div>
-                <label className="text-sm text-gray-400 block mb-2">From page</label>
+                <label className="text-sm text-[var(--muted-text)] block mb-2">From page</label>
                 <input type="number" min={1} max={splitTotal} className="input-field w-24" value={splitFrom}
                   onChange={e => setSplitFrom(Math.max(1, Math.min(+e.target.value, splitTo)))} />
               </div>
               <div>
-                <label className="text-sm text-gray-400 block mb-2">To page</label>
+                <label className="text-sm text-[var(--muted-text)] block mb-2">To page</label>
                 <input type="number" min={splitFrom} max={splitTotal} className="input-field w-24" value={splitTo}
                   onChange={e => setSplitTo(Math.max(splitFrom, Math.min(+e.target.value, splitTotal)))} />
               </div>
@@ -210,11 +210,11 @@ export default function PdfToolsPage() {
       {/* PDF → Image */}
       {tab === 'to-image' && (
         <div className="space-y-5">
-          <div className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-gray-600"
+          <div className="border-2 border-dashed border-[var(--card-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--muted-text)]"
             onClick={() => document.getElementById('pdf-img-input')?.click()}>
             <div className="text-4xl mb-2">🖼️</div>
-            <p className="text-gray-400">{pdfFile ? pdfFile.name : 'Click to select a PDF'}</p>
-            {renderTotal > 0 && <p className="text-indigo-400 text-sm mt-1">{renderTotal} pages total</p>}
+            <p className="text-[var(--muted-text)]">{pdfFile ? pdfFile.name : 'Click to select a PDF'}</p>
+            {renderTotal > 0 && <p className="text-[var(--foreground)] text-sm mt-1">{renderTotal} pages total</p>}
             <input id="pdf-img-input" type="file" accept=".pdf" className="hidden"
               onChange={async e => {
                 const f = e.target.files?.[0];
@@ -230,7 +230,7 @@ export default function PdfToolsPage() {
           {renderTotal > 0 && (
             <div className="flex gap-4 items-end">
               <div>
-                <label className="text-sm text-gray-400 block mb-2">Page</label>
+                <label className="text-sm text-[var(--muted-text)] block mb-2">Page</label>
                 <input type="number" min={1} max={renderTotal} className="input-field w-24" value={renderPage}
                   onChange={e => setRenderPage(Math.max(1, Math.min(+e.target.value, renderTotal)))} />
               </div>
@@ -252,17 +252,17 @@ export default function PdfToolsPage() {
       {/* Images → PDF */}
       {tab === 'img-to-pdf' && (
         <div className="space-y-5">
-          <div className="border-2 border-dashed border-gray-700 rounded-2xl p-8 text-center cursor-pointer hover:border-gray-600"
+          <div className="border-2 border-dashed border-[var(--card-border)] rounded-xl p-8 text-center cursor-pointer hover:border-[var(--muted-text)]"
             onClick={() => document.getElementById('img-pdf-input')?.click()}>
             <div className="text-4xl mb-2">📄</div>
-            <p className="text-gray-400">{imgFiles.length > 0 ? `${imgFiles.length} image(s) selected` : 'Click to select images (PNG/JPG)'}</p>
+            <p className="text-[var(--muted-text)]">{imgFiles.length > 0 ? `${imgFiles.length} image(s) selected` : 'Click to select images (PNG/JPG)'}</p>
             <input id="img-pdf-input" type="file" accept="image/png,image/jpeg" multiple className="hidden"
               onChange={e => setImgFiles(Array.from(e.target.files || []))} />
           </div>
           {imgFiles.length > 0 && (
             <div className="grid grid-cols-3 md:grid-cols-5 gap-3">
               {imgFiles.map((f, i) => (
-                <div key={i} className="tool-card p-2 text-center text-xs text-gray-400">
+                <div key={i} className="tool-card p-2 text-center text-xs text-[var(--muted-text)]">
                   <div className="text-2xl mb-1">🖼️</div>
                   <div className="truncate">{f.name}</div>
                 </div>
@@ -278,3 +278,5 @@ export default function PdfToolsPage() {
     </ToolPageWrapper>
   );
 }
+
+
