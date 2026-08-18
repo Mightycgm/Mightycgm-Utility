@@ -17,8 +17,8 @@ const SUPPORTED_FORMATS: FormatInfo[] = [
   { id: 'webp', name: 'WEBP', ext: 'webp', mime: 'image/webp', lossy: true, desc: 'Modern web format with superior compression' },
   { id: 'png', name: 'PNG', ext: 'png', mime: 'image/png', lossy: false, desc: 'Lossless quality with full transparency support' },
   { id: 'jpeg', name: 'JPG / JPEG', ext: 'jpg', mime: 'image/jpeg', lossy: true, desc: 'Universal standard photography format' },
-  { id: 'avif', name: 'AVIF', ext: 'avif', mime: 'image/avif', lossy: true, desc: 'Next-gen compact web format' },
   { id: 'ico', name: 'ICO', ext: 'ico', mime: 'image/x-icon', lossy: false, desc: 'Website favicon & application icon format' },
+  { id: 'avif', name: 'AVIF', ext: 'avif', mime: 'image/avif', lossy: true, desc: 'Next-gen compact web format' },
   { id: 'bmp', name: 'BMP', ext: 'bmp', mime: 'image/bmp', lossy: false, desc: 'Standard uncompressed Windows bitmap' },
   { id: 'svg', name: 'SVG', ext: 'svg', mime: 'image/svg+xml', lossy: false, desc: 'Scalable vector graphic container' },
   { id: 'gif', name: 'GIF', ext: 'gif', mime: 'image/gif', lossy: false, desc: 'Standard graphics interchange format' },
@@ -37,19 +37,22 @@ const PRESET_PAIRS: PresetPair[] = [
   { id: 'jpg-png', formatA: 'jpeg', nameA: 'JPG', formatB: 'png', nameB: 'PNG' },
   { id: 'jpg-webp', formatA: 'jpeg', nameA: 'JPG', formatB: 'webp', nameB: 'WEBP' },
   { id: 'png-ico', formatA: 'png', nameA: 'PNG', formatB: 'ico', nameB: 'ICO' },
+  { id: 'jpg-ico', formatA: 'jpeg', nameA: 'JPG', formatB: 'ico', nameB: 'ICO' },
+  { id: 'webp-ico', formatA: 'webp', nameA: 'WEBP', formatB: 'ico', nameB: 'ICO' },
+  { id: 'svg-ico', formatA: 'svg', nameA: 'SVG', formatB: 'ico', nameB: 'ICO' },
   { id: 'svg-png', formatA: 'svg', nameA: 'SVG', formatB: 'png', nameB: 'PNG' },
   { id: 'png-bmp', formatA: 'png', nameA: 'PNG', formatB: 'bmp', nameB: 'BMP' },
   { id: 'png-avif', formatA: 'png', nameA: 'PNG', formatB: 'avif', nameB: 'AVIF' },
 ];
 
 const ICO_SIZES = [
-  { label: 'Original Size', value: 0 },
-  { label: '256 × 256 (HD Icon)', value: 256 },
-  { label: '128 × 128 (Large)', value: 128 },
-  { label: '64 × 64 (Medium)', value: 64 },
-  { label: '48 × 48 (Windows App)', value: 48 },
-  { label: '32 × 32 (Standard Favicon)', value: 32 },
-  { label: '16 × 16 (Small Tab Icon)', value: 16 },
+  { label: 'Original Dimensions', value: 0, sub: 'Keep source resolution' },
+  { label: '256 × 256 px', value: 256, sub: 'Windows Jumbo / macOS HD Icon' },
+  { label: '128 × 128 px', value: 128, sub: 'Large Application Icon' },
+  { label: '64 × 64 px', value: 64, sub: 'High-DPI Retina Favicon' },
+  { label: '48 × 48 px', value: 48, sub: 'Windows Taskbar / Desktop' },
+  { label: '32 × 32 px', value: 32, sub: 'Standard Desktop Browser Tab' },
+  { label: '16 × 16 px', value: 16, sub: 'Small Browser Tab / Address Bar' },
 ];
 
 interface FileItem {
@@ -143,7 +146,7 @@ function canvasToBmpBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-// Pure JS ICO Encoder (wraps PNG data with ICO container)
+// Pure JS ICO Encoder (wraps high quality PNG data in standard ICO container)
 async function canvasToIcoBlob(canvas: HTMLCanvasElement, targetSize: number = 0): Promise<Blob> {
   let finalCanvas = canvas;
   if (targetSize > 0 && (canvas.width !== targetSize || canvas.height !== targetSize)) {
@@ -203,28 +206,33 @@ function canvasToSvgBlob(canvas: HTMLCanvasElement): Blob {
 export default function ImageToolsPage() {
   const [tab, setTab] = useState<Tab>('convert');
 
-  // Convert State
+  // Converter state
   const [items, setItems] = useState<FileItem[]>([]);
   const [globalTargetFormat, setGlobalTargetFormat] = useState<string>('webp');
   const [activePresetId, setActivePresetId] = useState<string>('png-webp');
-  
-  // Track direction (from ➔ to) for each preset pair button
-  const [presetDirections, setPresetDirections] = useState<Record<string, { from: string; fromName: string; to: string; toName: string }>>(() => {
-    const initial: Record<string, { from: string; fromName: string; to: string; toName: string }> = {};
-    PRESET_PAIRS.forEach((p) => {
-      initial[p.id] = { from: p.formatA, fromName: p.nameA, to: p.formatB, toName: p.nameB };
-    });
-    return initial;
-  });
-
-  const [quality, setQuality] = useState<number>(0.9);
+  const [quality, setQuality] = useState<number>(0.85);
   const [scale, setScale] = useState<number>(1);
   const [icoSize, setIcoSize] = useState<number>(0);
   const [bgFill, setBgFill] = useState<'transparent' | 'white' | 'black'>('transparent');
   const [isConvertingAll, setIsConvertingAll] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Compress State
+  // Preset swap directions state
+  const [presetDirections, setPresetDirections] = useState<
+    Record<string, { from: string; fromName: string; to: string; toName: string }>
+  >(() => {
+    const initial: Record<string, { from: string; fromName: string; to: string; toName: string }> = {};
+    PRESET_PAIRS.forEach((p) => {
+      initial[p.id] = {
+        from: p.formatA,
+        fromName: p.nameA,
+        to: p.formatB,
+        toName: p.nameB,
+      };
+    });
+    return initial;
+  });
+
+  // Compressor state
   const [compFile, setCompFile] = useState<File | null>(null);
   const [compPreview, setCompPreview] = useState('');
   const [compResultUrl, setCompResultUrl] = useState('');
@@ -234,18 +242,18 @@ export default function ImageToolsPage() {
   const [compMaxWidth, setCompMaxWidth] = useState(1920);
   const [compressing, setCompressing] = useState(false);
 
-  // Add files to Converter
-  const handleFilesAdded = useCallback((fileList: FileList | File[] | null) => {
-    if (!fileList || fileList.length === 0) return;
-    const newItems: FileItem[] = [];
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    Array.from(fileList).forEach((file) => {
-      if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|avif|bmp|ico|svg|gif)$/i)) return;
+  // Add files to list
+  const handleFilesAdded = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    const newItems: FileItem[] = [];
+    Array.from(files).forEach((file) => {
       const detected = detectFormat(file);
-      // Auto pick target format if same as source
       let target = globalTargetFormat;
       if (detected === globalTargetFormat) {
-        target = detected === 'webp' ? 'png' : detected === 'png' ? 'webp' : 'png';
+        target = globalTargetFormat === 'webp' ? 'png' : 'webp';
       }
 
       const previewUrl = URL.createObjectURL(file);
@@ -293,7 +301,7 @@ export default function ImageToolsPage() {
         if (files.length > 0) {
           e.preventDefault();
           if (tab === 'convert') {
-            handleFilesAdded(files);
+            handleFilesAdded(files as unknown as FileList);
           } else {
             handleCompressUpload(files[0]);
           }
@@ -355,17 +363,17 @@ export default function ImageToolsPage() {
             });
           }
 
-          URL.revokeObjectURL(url);
           const convertedUrl = URL.createObjectURL(resultBlob);
+          URL.revokeObjectURL(url);
 
           resolve({
             ...item,
+            status: 'done',
             convertedBlob: resultBlob,
             convertedUrl,
             convertedSize: resultBlob.size,
             width: targetW,
             height: targetH,
-            status: 'done',
           });
         } catch (err: unknown) {
           URL.revokeObjectURL(url);
@@ -382,7 +390,7 @@ export default function ImageToolsPage() {
         resolve({
           ...item,
           status: 'error',
-          errorMessage: 'Failed to load image',
+          errorMessage: 'Failed to load image file',
         });
       };
 
@@ -390,112 +398,91 @@ export default function ImageToolsPage() {
     });
   };
 
-  // Convert all items
+  // Convert All Items
   const convertAll = async () => {
     if (items.length === 0) return;
     setIsConvertingAll(true);
 
-    const updated = [...items];
-    for (let i = 0; i < updated.length; i++) {
-      updated[i] = { ...updated[i], status: 'converting' };
-      setItems([...updated]);
-      const result = await processConvertItem(updated[i]);
-      updated[i] = result;
-      setItems([...updated]);
-    }
+    setItems((prev) => prev.map((item) => ({ ...item, status: 'converting' })));
 
+    const updated = await Promise.all(items.map((item) => processConvertItem(item)));
+    setItems(updated);
     setIsConvertingAll(false);
   };
 
-  // Preset Button Click (Selects preset or Swaps if already active)
-  const handlePresetClick = (preset: PresetPair) => {
-    setPresetDirections((prev) => {
-      const current = prev[preset.id] || { from: preset.formatA, fromName: preset.nameA, to: preset.formatB, toName: preset.nameB };
+  // Convert Single Item
+  const convertSingle = async (id: string) => {
+    const item = items.find((i) => i.id === id);
+    if (!item) return;
 
-      if (activePresetId === preset.id) {
-        // Swap direction inside this button
-        const swapped = {
-          from: current.to,
-          fromName: current.toName,
-          to: current.from,
-          toName: current.fromName,
-        };
-        setGlobalTargetFormat(swapped.to);
-        if (items.length > 0) {
-          setItems((prevItems) =>
-            prevItems.map((item) => ({
-              ...item,
-              targetFormat: swapped.to,
-              status: 'idle',
-            }))
-          );
-        }
-        return { ...prev, [preset.id]: swapped };
-      } else {
-        // Activate this preset
-        setActivePresetId(preset.id);
-        setGlobalTargetFormat(current.to);
-        if (items.length > 0) {
-          setItems((prevItems) =>
-            prevItems.map((item) => ({
-              ...item,
-              targetFormat: current.to,
-              status: 'idle',
-            }))
-          );
-        }
-        return prev;
-      }
-    });
+    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, status: 'converting' } : i)));
+
+    const updated = await processConvertItem(item);
+    setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
   };
 
-  // Swap Source and Target format (Swaps the active button's direction)
-  const handleSwapFormats = () => {
-    if (activePresetId && presetDirections[activePresetId]) {
-      setPresetDirections((prev) => {
-        const current = prev[activePresetId];
-        const swapped = {
-          from: current.to,
-          fromName: current.toName,
-          to: current.from,
-          toName: current.fromName,
-        };
-        setGlobalTargetFormat(swapped.to);
-        if (items.length > 0) {
-          setItems((prevItems) =>
-            prevItems.map((item) => ({
-              ...item,
-              targetFormat: swapped.to,
-              status: 'idle',
-            }))
-          );
-        }
-        return { ...prev, [activePresetId]: swapped };
-      });
-    } else {
-      const dominantSource = items.length > 0 ? items[0].sourceFormat : 'png';
-      const currentTarget = globalTargetFormat;
-      const newTarget = dominantSource === currentTarget ? (currentTarget === 'webp' ? 'png' : 'webp') : dominantSource;
-      setGlobalTargetFormat(newTarget);
+  // Handle preset click with in-place swap
+  const handlePresetClick = (preset: PresetPair) => {
+    const currentDir = presetDirections[preset.id] || {
+      from: preset.formatA,
+      fromName: preset.nameA,
+      to: preset.formatB,
+      toName: preset.nameB,
+    };
 
-      if (items.length > 0) {
-        setItems((prev) =>
-          prev.map((item) => ({
-            ...item,
-            targetFormat: item.targetFormat === newTarget ? item.sourceFormat : newTarget,
-            status: 'idle',
-          }))
-        );
-      }
+    if (activePresetId === preset.id) {
+      // Swap direction in place
+      const swapped = {
+        from: currentDir.to,
+        fromName: currentDir.toName,
+        to: currentDir.from,
+        toName: currentDir.fromName,
+      };
+
+      setPresetDirections((prev) => ({
+        ...prev,
+        [preset.id]: swapped,
+      }));
+
+      setGlobalTargetFormat(swapped.to);
+      setItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          targetFormat: swapped.to,
+          status: 'idle',
+        }))
+      );
+    } else {
+      // Activate preset
+      setActivePresetId(preset.id);
+      setGlobalTargetFormat(currentDir.to);
+      setItems((prev) =>
+        prev.map((item) => ({
+          ...item,
+          targetFormat: currentDir.to,
+          status: 'idle',
+        }))
+      );
     }
   };
 
-  // Dropdown Target Format change
+  // Swap global target format
+  const handleSwapFormats = () => {
+    const currentPreset = PRESET_PAIRS.find((p) => p.id === activePresetId);
+    if (currentPreset) {
+      handlePresetClick(currentPreset);
+      return;
+    }
+
+    const nextFmt = globalTargetFormat === 'webp' ? 'png' : 'webp';
+    handleGlobalFormatChange(nextFmt);
+  };
+
+  // Change Global Target Format
   const handleGlobalFormatChange = (newFmt: string) => {
     setGlobalTargetFormat(newFmt);
     setItems((prev) => prev.map((item) => ({ ...item, targetFormat: newFmt, status: 'idle' })));
 
-    // Match or align active preset
     const matched = PRESET_PAIRS.find((p) => p.formatA === newFmt || p.formatB === newFmt);
     if (matched) {
       setActivePresetId(matched.id);
@@ -606,11 +593,41 @@ export default function ImageToolsPage() {
       {/* CONVERT TAB */}
       {tab === 'convert' && (
         <div className="space-y-8">
+          {/* Direct Target Format Selector (All 8 Formats Including ICO) */}
+          <div className="tool-card p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
+                Target Output Format
+              </span>
+              <span className="text-xs text-[var(--muted-text)]">Select any target format in 1 click</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {SUPPORTED_FORMATS.map((fmt) => {
+                const isSelected = globalTargetFormat === fmt.id;
+                return (
+                  <button
+                    key={fmt.id}
+                    type="button"
+                    onClick={() => handleGlobalFormatChange(fmt.id)}
+                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer select-none ${
+                      isSelected
+                        ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm scale-105'
+                        : 'bg-[var(--muted)] border border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
+                    }`}
+                  >
+                    <span>{fmt.name}</span>
+                    <span className="opacity-60 text-[10px]">.{fmt.ext}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Quick Swap Preset Pills */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                Quick Swap & Convert Presets
+                Quick Swap Presets
               </span>
               <span className="text-xs text-[var(--muted-text)]">Click active button to swap direction (⇄)</span>
             </div>
@@ -676,6 +693,43 @@ export default function ImageToolsPage() {
               onChange={(e) => handleFilesAdded(e.target.files)}
             />
           </div>
+
+          {/* Dedicated ICO Size Presets Panel */}
+          {globalTargetFormat === 'ico' && (
+            <div className="tool-card p-5 space-y-3 bg-[var(--card)] border border-indigo-500/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🎯</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">
+                    ICO Favicon & Application Size Presets
+                  </span>
+                </div>
+                <span className="text-xs text-[var(--muted-text)] font-mono">
+                  Current: {icoSize === 0 ? 'Original Size' : `${icoSize} × ${icoSize} px`}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 pt-1">
+                {ICO_SIZES.map((size) => {
+                  const isSelected = icoSize === size.value;
+                  return (
+                    <button
+                      key={size.value}
+                      type="button"
+                      onClick={() => setIcoSize(size.value)}
+                      className={`p-2.5 rounded-lg text-left transition-all border cursor-pointer select-none flex flex-col justify-between ${
+                        isSelected
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
+                      }`}
+                    >
+                      <span className="text-xs font-bold">{size.label}</span>
+                      <span className="text-[10px] opacity-75 mt-1 leading-tight">{size.sub}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Conversion Options Toolbar */}
           <div className="tool-card p-5 space-y-5">
@@ -758,40 +812,27 @@ export default function ImageToolsPage() {
 
               {/* Scaling */}
               <div className="space-y-1.5">
-                <span className="text-[var(--muted-text)] font-medium block">Resize Scale</span>
-                <select
-                  className="input-field py-1 text-xs"
+                <div className="flex justify-between">
+                  <span className="text-[var(--muted-text)] font-medium">Resolution Scale</span>
+                  <span className="font-semibold tabular-nums">{Math.round(scale * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min={0.2}
+                  max={2}
+                  step={0.1}
                   value={scale}
                   onChange={(e) => setScale(+e.target.value)}
-                >
-                  <option value={1}>100% (Original Resolution)</option>
-                  <option value={0.75}>75% Scale</option>
-                  <option value={0.5}>50% Scale</option>
-                  <option value={0.25}>25% Scale</option>
-                  <option value={2}>200% (Upscale 2x)</option>
-                </select>
+                  className="app-slider"
+                />
               </div>
 
-              {/* Background Fill */}
-              <div className="space-y-1.5">
-                <span className="text-[var(--muted-text)] font-medium block">Background Fill</span>
-                <select
-                  className="input-field py-1 text-xs"
-                  value={bgFill}
-                  onChange={(e) => setBgFill(e.target.value as 'transparent' | 'white' | 'black')}
-                >
-                  <option value="transparent">Transparent (Default)</option>
-                  <option value="white">White (#FFFFFF)</option>
-                  <option value="black">Black (#000000)</option>
-                </select>
-              </div>
-
-              {/* ICO Size Preset */}
+              {/* ICO Size Dropdown */}
               {globalTargetFormat === 'ico' && (
                 <div className="space-y-1.5">
-                  <span className="text-[var(--muted-text)] font-medium block">Icon Dimensions</span>
+                  <label className="text-[var(--muted-text)] font-medium block">Icon Preset</label>
                   <select
-                    className="input-field py-1 text-xs"
+                    className="input-field py-1 text-xs w-full cursor-pointer"
                     value={icoSize}
                     onChange={(e) => setIcoSize(+e.target.value)}
                   >
@@ -803,128 +844,132 @@ export default function ImageToolsPage() {
                   </select>
                 </div>
               )}
+
+              {/* Background Color for Transparency */}
+              <div className="space-y-1.5">
+                <label className="text-[var(--muted-text)] font-medium block">Background Fill</label>
+                <div className="flex gap-1">
+                  {(['transparent', 'white', 'black'] as const).map((bg) => (
+                    <button
+                      key={bg}
+                      type="button"
+                      onClick={() => setBgFill(bg)}
+                      className={`flex-1 py-1 rounded border capitalize font-medium transition-all ${
+                        bgFill === bg
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--muted-text)]'
+                      }`}
+                    >
+                      {bg}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Files List / Results */}
-          {items.length > 0 ? (
+          {/* Queue & Results List */}
+          {items.length > 0 && (
             <div className="space-y-3">
-              <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)] px-1">
-                <span>Files Queue ({items.length})</span>
-                <span>Status & Download</span>
+              <div className="flex items-center justify-between text-xs text-[var(--muted-text)]">
+                <span>{items.length} Files Ready</span>
+                <span>Click individual Convert or use Convert All above</span>
               </div>
 
-              <div className="space-y-2.5">
+              <div className="space-y-2">
                 {items.map((item) => {
-                  const targetObj = SUPPORTED_FORMATS.find((f) => f.id === item.targetFormat) || SUPPORTED_FORMATS[0];
-                  const ext = targetObj.ext;
+                  const formatObj = SUPPORTED_FORMATS.find((f) => f.id === item.targetFormat);
+                  const ext = formatObj?.ext || item.targetFormat;
                   const nameWithoutExt = item.file.name.replace(/\.[^/.]+$/, '');
 
                   return (
                     <div
                       key={item.id}
-                      className="tool-card p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+                      className="tool-card p-4 flex flex-wrap items-center justify-between gap-4 transition-all"
                     >
                       {/* Left: Thumbnail & Info */}
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex items-center gap-3 min-w-[200px]">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={item.previewUrl}
+                          src={item.convertedUrl || item.previewUrl}
                           alt={item.file.name}
-                          className="w-12 h-12 rounded object-cover border border-[var(--card-border)] bg-[var(--muted)] flex-shrink-0"
+                          className="w-12 h-12 rounded object-contain bg-[var(--muted)] border border-[var(--card-border)] p-1"
                         />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium text-[var(--foreground)] truncate max-w-xs md:max-w-sm">
+                        <div>
+                          <p className="text-sm font-medium text-[var(--foreground)] truncate max-w-[220px]" title={item.file.name}>
                             {item.file.name}
                           </p>
-                          <div className="flex items-center gap-2 text-xs text-[var(--muted-text)] mt-0.5">
-                            <span className="font-mono">{fmtSize(item.originalSize)}</span>
+                          <div className="flex items-center gap-2 mt-0.5 text-xs text-[var(--muted-text)]">
+                            <span className="uppercase font-semibold">{item.sourceFormat}</span>
                             <span>•</span>
-                            <span className="uppercase font-semibold px-1.5 py-0.5 rounded bg-[var(--muted)] text-[10px]">
-                              {item.sourceFormat}
-                            </span>
-                            <span>➔</span>
-                            <select
-                              className="bg-[var(--card)] border border-[var(--card-border)] rounded px-1 py-0.5 text-xs text-[var(--foreground)] outline-none"
-                              value={item.targetFormat}
-                              onChange={(e) => setItemTargetFormat(item.id, e.target.value)}
-                            >
-                              {SUPPORTED_FORMATS.map((f) => (
-                                <option key={f.id} value={f.id}>
-                                  {f.name}
-                                </option>
-                              ))}
-                            </select>
+                            <span>{fmtSize(item.originalSize)}</span>
+                            {item.convertedSize && (
+                              <>
+                                <span>➔</span>
+                                <span className="text-green-400 font-semibold">{fmtSize(item.convertedSize)}</span>
+                              </>
+                            )}
                           </div>
                         </div>
                       </div>
 
-                      {/* Right: Status & Actions */}
-                      <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end">
-                        {item.status === 'done' && item.convertedSize !== undefined && (
-                          <div className="text-right">
-                            <span className="text-xs font-semibold font-mono block text-[var(--foreground)]">
-                              {fmtSize(item.convertedSize)}
-                            </span>
-                            <span className="text-[10px] text-[var(--muted-text)]">
-                              {item.convertedSize < item.originalSize
-                                ? `Saved ${Math.round((1 - item.convertedSize / item.originalSize) * 100)}%`
-                                : `${Math.round((item.convertedSize / item.originalSize) * 100)}% size`}
-                            </span>
-                          </div>
-                        )}
+                      {/* Middle: Target Format Dropdown */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-[var(--muted-text)]">To:</span>
+                        <select
+                          className="input-field py-1 text-xs w-auto cursor-pointer"
+                          value={item.targetFormat}
+                          onChange={(e) => setItemTargetFormat(item.id, e.target.value)}
+                        >
+                          {SUPPORTED_FORMATS.map((fmt) => (
+                            <option key={fmt.id} value={fmt.id}>
+                              {fmt.name} (.{fmt.ext})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                        {item.status === 'error' && (
-                          <span className="text-xs text-red-400 font-medium">Failed</span>
-                        )}
-
-                        {item.status === 'converting' && (
-                          <span className="text-xs text-[var(--muted-text)] animate-pulse">Converting...</span>
-                        )}
-
-                        <div className="flex items-center gap-1.5">
-                          {item.status === 'done' && item.convertedUrl ? (
-                            <a
-                              href={item.convertedUrl}
-                              download={`${nameWithoutExt}.${ext}`}
-                              className="btn-primary text-xs py-1.5 px-3 font-medium"
-                            >
-                              ⬇ Save
-                            </a>
-                          ) : (
-                            <button
-                              onClick={async () => {
-                                setItems((prev) =>
-                                  prev.map((i) => (i.id === item.id ? { ...i, status: 'converting' } : i))
-                                );
-                                const res = await processConvertItem(item);
-                                setItems((prev) => prev.map((i) => (i.id === item.id ? res : i)));
-                              }}
-                              disabled={item.status === 'converting'}
-                              className="btn-secondary text-xs py-1.5 px-3"
-                            >
-                              Convert
-                            </button>
-                          )}
-
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-2">
+                        {item.status === 'idle' && (
                           <button
-                            onClick={() => removeItem(item.id)}
-                            className="p-1.5 text-xs text-[var(--muted-text)] hover:text-red-500 transition-colors rounded"
-                            title="Remove item"
+                            onClick={() => convertSingle(item.id)}
+                            className="btn-secondary text-xs py-1.5 px-3"
                           >
-                            ✕
+                            Convert
                           </button>
-                        </div>
+                        )}
+                        {item.status === 'converting' && (
+                          <span className="text-xs text-indigo-400 flex items-center gap-1">
+                            <span className="w-3 h-3 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                            Converting...
+                          </span>
+                        )}
+                        {item.status === 'done' && item.convertedUrl && (
+                          <a
+                            href={item.convertedUrl}
+                            download={`${nameWithoutExt}.${ext}`}
+                            className="btn-primary text-xs py-1.5 px-3 font-semibold flex items-center gap-1"
+                          >
+                            <span>⬇ Download</span>
+                          </a>
+                        )}
+                        {item.status === 'error' && (
+                          <span className="text-xs text-red-400 font-medium">❌ {item.errorMessage}</span>
+                        )}
+
+                        <button
+                          onClick={() => removeItem(item.id)}
+                          className="text-[var(--muted-text)] hover:text-red-400 p-1.5 text-xs transition-colors"
+                          title="Remove from list"
+                        >
+                          ✕
+                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
-            </div>
-          ) : (
-            <div className="tool-card p-6 text-center text-[var(--muted-text)] text-xs space-y-1">
-              <p className="font-medium text-[var(--foreground)] text-sm">No images queued yet</p>
-              <p>Upload or drag-and-drop one or multiple images above to start converting.</p>
             </div>
           )}
         </div>
@@ -934,22 +979,30 @@ export default function ImageToolsPage() {
       {tab === 'compress' && (
         <div className="space-y-6">
           <div
-            className="drop-zone py-12"
+            className="drop-zone group py-12"
             onClick={() => document.getElementById('comp-input')?.click()}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              const f = e.dataTransfer.files[0];
+              const f = e.dataTransfer.files?.[0];
               if (f) handleCompressUpload(f);
             }}
           >
-            <div className="text-4xl mb-2">🗜️</div>
+            <div className="text-4xl mb-2 group-hover:scale-110 transition-transform">🗜️</div>
             {compFile ? (
-              <p className="text-sm font-medium text-[var(--foreground)]">
-                {compFile.name} <span className="text-[var(--muted-text)]">({fmtSize(compOrigSize)})</span>
+              <p className="text-sm text-[var(--foreground)] font-medium">
+                {compFile.name} ({fmtSize(compOrigSize)})
               </p>
             ) : (
-              <p className="text-sm text-[var(--muted-text)]">Click or drop an image here to compress</p>
+              <div>
+                <p className="text-sm font-medium text-[var(--foreground)]">
+                  Click or drop image to compress, or press{' '}
+                  <kbd className="px-2 py-0.5 rounded bg-[var(--muted)] border border-[var(--card-border)] text-xs font-mono">
+                    Ctrl + V
+                  </kbd>
+                </p>
+                <p className="text-xs text-[var(--muted-text)] mt-1">Smart compression with Web Workers</p>
+              </div>
             )}
             <input
               id="comp-input"
@@ -964,11 +1017,11 @@ export default function ImageToolsPage() {
           </div>
 
           {compFile && (
-            <div className="grid md:grid-cols-2 gap-8">
-              <div className="space-y-5">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[var(--muted-text)] font-medium">Compression Quality</span>
+            <div className="grid md:grid-cols-2 gap-6">
+              <div className="tool-card p-6 space-y-5">
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--muted-text)] font-medium">Target Quality</span>
                     <span className="font-semibold tabular-nums">{Math.round(compQuality * 100)}%</span>
                   </div>
                   <input
@@ -981,49 +1034,51 @@ export default function ImageToolsPage() {
                     className="app-slider"
                   />
                 </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-[var(--muted-text)] font-medium">Max Width Resolution</span>
+
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-[var(--muted-text)] font-medium">Max Dimensions</span>
                     <span className="font-semibold tabular-nums">{compMaxWidth}px</span>
                   </div>
                   <input
                     type="range"
                     min={640}
-                    max={4096}
-                    step={320}
+                    max={3840}
+                    step={160}
                     value={compMaxWidth}
                     onChange={(e) => setCompMaxWidth(+e.target.value)}
                     className="app-slider"
                   />
                 </div>
+
                 <button
-                  className="btn-primary w-full py-2.5"
+                  className="btn-primary w-full py-3 text-sm font-semibold"
                   onClick={compress}
                   disabled={compressing}
                 >
-                  {compressing ? 'Compressing...' : 'Compress Image'}
+                  {compressing ? 'Compressing with Web Worker...' : 'Compress Image'}
                 </button>
 
                 {compResultUrl && (
-                  <div className="tool-card p-4 space-y-2.5">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[var(--muted-text)]">Original Size</span>
-                      <span className="font-medium">{fmtSize(compOrigSize)}</span>
+                  <div className="tool-card p-4 space-y-2.5 bg-[var(--muted)] border border-[var(--card-border)]">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-[var(--muted-text)]">Original:</span>
+                      <span className="text-red-400 font-semibold">{fmtSize(compOrigSize)}</span>
                     </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-[var(--muted-text)]">Compressed Size</span>
-                      <span className="font-medium">{fmtSize(compResultSize)}</span>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-[var(--muted-text)]">Compressed:</span>
+                      <span className="text-green-400 font-semibold">{fmtSize(compResultSize)}</span>
                     </div>
-                    <div className="flex justify-between text-sm border-t border-[var(--card-border)] pt-2">
-                      <span className="text-[var(--muted-text)]">Saved Space</span>
-                      <span className="font-semibold text-[var(--foreground)]">
-                        {Math.round((1 - compResultSize / compOrigSize) * 100)}%
+                    <div className="flex justify-between text-xs font-bold border-t border-[var(--card-border)] pt-2">
+                      <span className="text-[var(--foreground)]">Size Saved:</span>
+                      <span className="text-indigo-400">
+                        {Math.max(0, Math.round((1 - compResultSize / compOrigSize) * 100))}%
                       </span>
                     </div>
                     <a
                       href={compResultUrl}
-                      download={`compressed_${compFile.name}`}
-                      className="btn-secondary w-full text-center block text-sm"
+                      download="compressed.jpg"
+                      className="btn-primary w-full text-center block mt-3 py-2 text-xs font-semibold"
                     >
                       ⬇ Download Compressed Image
                     </a>
@@ -1031,14 +1086,13 @@ export default function ImageToolsPage() {
                 )}
               </div>
 
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               {compPreview && (
-                <div className="space-y-2">
-                  <span className="text-xs text-[var(--muted-text)] font-medium block">Preview</span>
+                <div className="tool-card p-4 flex items-center justify-center bg-[var(--muted)]">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={compPreview}
+                    src={compResultUrl || compPreview}
                     alt="Preview"
-                    className="rounded-lg object-contain max-h-64 w-full border border-[var(--card-border)] bg-[var(--card)]"
+                    className="rounded max-h-72 object-contain w-full"
                   />
                 </div>
               )}

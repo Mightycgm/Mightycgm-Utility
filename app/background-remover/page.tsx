@@ -106,7 +106,6 @@ export default function BackgroundRemoverPage() {
   // View & Slider Mode
   const [viewMode, setViewMode] = useState<ViewMode>('slider');
   const [sliderPosition, setSliderPosition] = useState<number>(50);
-  const isDraggingSliderRef = useRef(false);
 
   // Erase / Restore / Magic Eraser Editor
   const [showEditor, setShowEditor] = useState(false);
@@ -505,15 +504,6 @@ export default function BackgroundRemoverPage() {
         setTimeout(() => setCopied(false), 2000);
       }
     }
-  };
-
-  // Split Comparison Slider Drag Handlers
-  const handleSliderMove = (clientX: number) => {
-    if (!sliderContainerRef.current || !isDraggingSliderRef.current) return;
-    const rect = sliderContainerRef.current.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
-    setSliderPosition(percentage);
   };
 
   // Drag & drop handlers
@@ -960,27 +950,32 @@ export default function BackgroundRemoverPage() {
 
                     <div
                       ref={sliderContainerRef}
-                      className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none h-[480px] flex items-center justify-center cursor-ew-resize"
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        const container = sliderContainerRef.current;
+                        if (!container) return;
+                        const rect = container.getBoundingClientRect();
+                        const updatePos = (clientX: number) => {
+                          const x = clientX - rect.left;
+                          const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+                          setSliderPosition(percentage);
+                        };
+                        updatePos(e.clientX);
+
+                        const onMove = (moveEvt: PointerEvent) => {
+                          updatePos(moveEvt.clientX);
+                        };
+                        const onUp = () => {
+                          window.removeEventListener('pointermove', onMove);
+                          window.removeEventListener('pointerup', onUp);
+                        };
+                        window.addEventListener('pointermove', onMove);
+                        window.addEventListener('pointerup', onUp);
+                      }}
+                      className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none h-[480px] flex items-center justify-center cursor-ew-resize touch-none"
                       style={{
                         background:
                           'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
-                      }}
-                      onMouseDown={(e) => {
-                        isDraggingSliderRef.current = true;
-                        handleSliderMove(e.clientX);
-                      }}
-                      onMouseUp={() => {
-                        isDraggingSliderRef.current = false;
-                      }}
-                      onMouseMove={(e) => {
-                        if (isDraggingSliderRef.current) {
-                          handleSliderMove(e.clientX);
-                        }
-                      }}
-                      onTouchMove={(e) => {
-                        if (e.touches[0]) {
-                          handleSliderMove(e.touches[0].clientX);
-                        }
                       }}
                     >
                       {/* Original (Underneath / Left clipped) */}
@@ -1015,6 +1010,17 @@ export default function BackgroundRemoverPage() {
                           ◀▶
                         </div>
                       </div>
+
+                      {/* Accessible Range Input Overlay */}
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={sliderPosition}
+                        onChange={(e) => setSliderPosition(+e.target.value)}
+                        aria-label="Before and After comparison slider"
+                        className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
+                      />
                     </div>
                   </div>
                 )}
