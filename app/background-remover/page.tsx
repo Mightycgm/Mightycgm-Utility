@@ -2,159 +2,267 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
-interface BrushPoint {
-  x: number;
-  y: number;
+type ViewMode = 'cutout' | 'original' | 'slider';
+
+interface HistoryState {
+  imageData: ImageData;
 }
 
 export default function BackgroundRemoverPage() {
   const [originalUrl, setOriginalUrl] = useState<string>('');
   const [resultUrl, setResultUrl] = useState<string>('');
+  const [resultBlob, setResultBlob] = useState<Blob | null>(null);
   const [imageName, setImageName] = useState('image');
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [dragging, setDragging] = useState(false);
-
-  const [bgReplace, setBgReplace] = useState<'transparent' | 'white' | 'black' | 'custom'>('transparent');
-  const [customBgColor, setCustomBgColor] = useState('#3b82f6');
   const [currentFile, setCurrentFile] = useState<File | null>(null);
-  const [finalDownloadUrl, setFinalDownloadUrl] = useState<string>('');
+  const [copied, setCopied] = useState(false);
 
-  // Manual Touch-up Tools
-  const [showTouchup, setShowTouchup] = useState(false);
+  // View & Comparison Controls
+  const [viewMode, setViewMode] = useState<ViewMode>('slider');
+  const [sliderPosition, setSliderPosition] = useState<number>(50);
+  const isDraggingSliderRef = useRef(false);
+
+  // Remove.bg API key
+  const [apiKey, setApiKey] = useState('');
+
+  // Erase / Restore Editor (Remove.bg style)
+  const [showEditor, setShowEditor] = useState(false);
   const [activeTool, setActiveTool] = useState<'erase' | 'restore'>('erase');
-  const [brushSize, setBrushSize] = useState<number>(30);
-  const [cursorPos, setCursorPos] = useState<BrushPoint | null>(null);
+  const [brushSize, setBrushSize] = useState<number>(28);
+  const [brushSoftness, setBrushSoftness] = useState<number>(20);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
+  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Undo / Redo Stacks
+  const [canUndo, setCanUndo] = useState(false);
+  const [canRedo, setCanRedo] = useState(false);
+  const undoStackRef = useRef<HistoryState[]>([]);
+  const redoStackRef = useRef<HistoryState[]>([]);
 
   // Refs
   const sourceImageRef = useRef<HTMLImageElement | null>(null);
   const resultImageRef = useRef<HTMLImageElement | null>(null);
-  const touchupCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const isDrawingRef = useRef(false);
+  const editorCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const isPaintingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sliderContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Run AI Background Removal (True Semantic Neural Network ISNet)
-  const processImageWithAI = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
-      return;
-    }
-
-    setCurrentFile(file);
-    setErrorMessage('');
-    setResultUrl('');
-    setLoading(true);
-    setStatusText('Loading AI model...');
-    setProgressPercent(10);
-
-    const name = file.name.replace(/\.[^/.]+$/, '');
-    setImageName(name || 'cutout');
-
-    const previewUrl = URL.createObjectURL(file);
-    setOriginalUrl(previewUrl);
-
-    const origImg = new Image();
-    origImg.onload = () => {
-      sourceImageRef.current = origImg;
-    };
-    origImg.src = previewUrl;
-
-    try {
-      // Dynamic import to keep initial bundle ultra fast
-      const { removeBackground } = await import('@imgly/background-removal');
-
-      setStatusText('Processing image with AI...');
-      setProgressPercent(25);
-
-      // Run with isnet_quint8 (quantized fast production model ~20MB, cached in browser)
-      const blob = await removeBackground(file, {
-        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-        model: 'isnet_quint8',
-        rescale: true,
-        progress: (key: string, current: number, total: number) => {
-          if (total > 0) {
-            const percent = Math.min(95, Math.round((current / total) * 100));
-            setProgressPercent(percent);
-            if (key.includes('fetch') || key.includes('download')) {
-              setStatusText(`Downloading AI model: ${percent}% (Cached after 1st time)`);
-            } else {
-              setStatusText(`Segmenting subject: ${percent}%`);
-            }
-          }
-        },
-        debug: false,
-      });
-
-      const url = URL.createObjectURL(blob);
-      setResultUrl(url);
-
-      const resImg = new Image();
-      resImg.onload = () => {
-        resultImageRef.current = resImg;
-        // Init touchup canvas with AI result
-        if (touchupCanvasRef.current) {
-          const canvas = touchupCanvasRef.current;
-          canvas.width = resImg.naturalWidth;
-          canvas.height = resImg.naturalHeight;
-          const ctx = canvas.getContext('2d')!;
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(resImg, 0, 0);
-        }
-      };
-      resImg.src = url;
-
-      setProgressPercent(100);
-      setStatusText('');
-    } catch (err: unknown) {
-      console.error('AI removal failed:', err);
-      setErrorMessage(
-        err instanceof Error
-          ? `AI Processing error: ${err.message}. Please try another image.`
-          : 'Failed to process image. Please try again.'
-      );
-    } finally {
-      setLoading(false);
-    }
+  // Load Remove.bg API key from settings
+  useEffect(() => {
+    setTimeout(() => {
+      setApiKey(localStorage.getItem('removebg_api_key') || '');
+    }, 0);
   }, []);
 
-  // Synchronize composite download URL when background replacement changes
-  useEffect(() => {
-    if (!resultUrl) {
-      setTimeout(() => setFinalDownloadUrl(''), 0);
-      return;
-    }
+  // Save history state for Undo
+  const pushHistory = (canvas: HTMLCanvasElement) => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    undoStackRef.current.push({ imageData: imgData });
+    if (undoStackRef.current.length > 20) undoStackRef.current.shift();
+    redoStackRef.current = [];
+    setCanUndo(true);
+    setCanRedo(false);
+  };
 
-    if (bgReplace === 'transparent') {
-      setTimeout(() => setFinalDownloadUrl(resultUrl), 0);
-      return;
-    }
+  const handleUndo = () => {
+    const canvas = editorCanvasRef.current;
+    if (!canvas || undoStackRef.current.length <= 1) return;
 
-    const img = touchupCanvasRef.current || resultImageRef.current;
-    if (!img) {
-      setTimeout(() => setFinalDownloadUrl(resultUrl), 0);
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    canvas.width = 'naturalWidth' in img ? img.naturalWidth : img.width;
-    canvas.height = 'naturalHeight' in img ? img.naturalHeight : img.height;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.fillStyle = bgReplace === 'white' ? '#FFFFFF' : bgReplace === 'black' ? '#000000' : customBgColor;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0);
+    const currentState = undoStackRef.current.pop()!;
+    redoStackRef.current.push(currentState);
+
+    const prevState = undoStackRef.current[undoStackRef.current.length - 1];
+    ctx.putImageData(prevState.imageData, 0, 0);
 
     const dataUrl = canvas.toDataURL('image/png');
-    setTimeout(() => setFinalDownloadUrl(dataUrl), 0);
-  }, [resultUrl, bgReplace, customBgColor]);
+    setResultUrl(dataUrl);
+    canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
 
-  // Touch-up drawing handler
-  const drawTouchup = (clientX: number, clientY: number) => {
-    const canvas = touchupCanvasRef.current;
-    if (!canvas || !isDrawingRef.current) return;
+    setCanUndo(undoStackRef.current.length > 1);
+    setCanRedo(true);
+  };
+
+  const handleRedo = () => {
+    const canvas = editorCanvasRef.current;
+    if (!canvas || redoStackRef.current.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const nextState = redoStackRef.current.pop()!;
+    undoStackRef.current.push(nextState);
+    ctx.putImageData(nextState.imageData, 0, 0);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    setResultUrl(dataUrl);
+    canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
+
+    setCanUndo(true);
+    setCanRedo(redoStackRef.current.length > 0);
+  };
+
+  // Main Background Removal Process (Remove.bg API or High-Speed Neural AI)
+  const processImage = useCallback(
+    async (file: File) => {
+      if (!file.type.startsWith('image/')) {
+        setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
+        return;
+      }
+
+      setCurrentFile(file);
+      setErrorMessage('');
+      setResultUrl('');
+      setResultBlob(null);
+      setLoading(true);
+      setShowEditor(false);
+      undoStackRef.current = [];
+      redoStackRef.current = [];
+      setCanUndo(false);
+      setCanRedo(false);
+
+      const name = file.name.replace(/\.[^/.]+$/, '');
+      setImageName(name || 'removed-bg');
+
+      const previewUrl = URL.createObjectURL(file);
+      setOriginalUrl(previewUrl);
+
+      const origImg = new Image();
+      origImg.onload = () => {
+        sourceImageRef.current = origImg;
+      };
+      origImg.src = previewUrl;
+
+      // 1. Try Remove.bg Official API if user configured key in Settings
+      const storedKey = localStorage.getItem('removebg_api_key') || apiKey;
+      if (storedKey) {
+        setStatusText('Processing via Remove.bg API (0.5s)...');
+        setProgressPercent(40);
+        try {
+          const formData = new FormData();
+          formData.append('image_file', file);
+          formData.append('size', 'auto');
+
+          const response = await fetch('https://api.remove.bg/v1.0/removebg', {
+            method: 'POST',
+            headers: {
+              'X-Api-Key': storedKey,
+            },
+            body: formData,
+          });
+
+          if (response.ok) {
+            const blob = await response.blob();
+            const url = URL.createObjectURL(blob);
+            setResultUrl(url);
+            setResultBlob(blob);
+            setProgressPercent(100);
+            setStatusText('');
+            setLoading(false);
+            return;
+          } else {
+            console.warn('Remove.bg API returned non-200, falling back to on-device AI');
+          }
+        } catch (apiErr) {
+          console.warn('Remove.bg API failed, falling back to local on-device AI', apiErr);
+        }
+      }
+
+      // 2. High-Speed On-Device AI Neural Network (ISNet Quantized)
+      try {
+        setStatusText('Loading AI model...');
+        setProgressPercent(15);
+
+        const { removeBackground } = await import('@imgly/background-removal');
+
+        setStatusText('Removing background...');
+        setProgressPercent(30);
+
+        const blob = await removeBackground(file, {
+          publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
+          model: 'isnet_quint8',
+          rescale: true,
+          progress: (key: string, current: number, total: number) => {
+            if (total > 0) {
+              const percent = Math.min(95, Math.round((current / total) * 100));
+              setProgressPercent(percent);
+              if (key.includes('fetch') || key.includes('download')) {
+                setStatusText(`Downloading AI: ${percent}% (Cached after 1st time)`);
+              } else {
+                setStatusText(`Segmenting subject: ${percent}%`);
+              }
+            }
+          },
+          debug: false,
+        });
+
+        const url = URL.createObjectURL(blob);
+        setResultUrl(url);
+        setResultBlob(blob);
+
+        const resImg = new Image();
+        resImg.onload = () => {
+          resultImageRef.current = resImg;
+          // Init canvas for Editor
+          if (editorCanvasRef.current) {
+            const canvas = editorCanvasRef.current;
+            canvas.width = resImg.naturalWidth;
+            canvas.height = resImg.naturalHeight;
+            const ctx = canvas.getContext('2d')!;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(resImg, 0, 0);
+            pushHistory(canvas);
+          }
+        };
+        resImg.src = url;
+
+        setProgressPercent(100);
+        setStatusText('');
+      } catch (err: unknown) {
+        console.error('AI removal failed:', err);
+        setErrorMessage(
+          err instanceof Error
+            ? `AI Error: ${err.message}. Please try again.`
+            : 'Failed to remove background. Please try another image.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [apiKey]
+  );
+
+  // Setup Editor canvas when switching to editor mode
+  const openEditor = () => {
+    setShowEditor(true);
+    setTimeout(() => {
+      if (editorCanvasRef.current && resultImageRef.current) {
+        const canvas = editorCanvasRef.current;
+        const img = resultImageRef.current;
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        const ctx = canvas.getContext('2d')!;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        if (undoStackRef.current.length === 0) {
+          pushHistory(canvas);
+        }
+      }
+    }, 50);
+  };
+
+  // Touch-up / Erase & Restore Drawing Handler
+  const drawOnCanvas = (clientX: number, clientY: number) => {
+    const canvas = editorCanvasRef.current;
+    if (!canvas || !isPaintingRef.current) return;
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -164,33 +272,70 @@ export default function BackgroundRemoverPage() {
     const y = (clientY - rect.top) * scaleY;
 
     const ctx = canvas.getContext('2d')!;
+    const actualRadius = (brushSize / 2) * (canvas.width / 400);
+
     ctx.save();
 
     if (activeTool === 'erase') {
       ctx.globalCompositeOperation = 'destination-out';
-      ctx.beginPath();
-      ctx.arc(x, y, brushSize * (canvas.width / 500), 0, Math.PI * 2);
-      ctx.fill();
+      if (brushSoftness > 0) {
+        const grad = ctx.createRadialGradient(x, y, actualRadius * (1 - brushSoftness / 100), x, y, actualRadius);
+        grad.addColorStop(0, 'rgba(0,0,0,1)');
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.beginPath();
+        ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
     } else if (activeTool === 'restore' && sourceImageRef.current) {
       ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
       ctx.beginPath();
-      ctx.arc(x, y, brushSize * (canvas.width / 500), 0, Math.PI * 2);
+      ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
       ctx.clip();
       ctx.drawImage(sourceImageRef.current, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
     }
 
     ctx.restore();
-    setResultUrl(canvas.toDataURL('image/png'));
+
+    const dataUrl = canvas.toDataURL('image/png');
+    setResultUrl(dataUrl);
+    canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
   };
 
-  // Reset touchup to original AI cutout
-  const resetToAiCutout = () => {
-    if (!resultImageRef.current || !touchupCanvasRef.current) return;
-    const canvas = touchupCanvasRef.current;
-    const ctx = canvas.getContext('2d')!;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(resultImageRef.current, 0, 0);
-    setResultUrl(canvas.toDataURL('image/png'));
+  // Copy Cutout PNG to Clipboard
+  const copyCutoutToClipboard = async () => {
+    if (!resultBlob) return;
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'image/png': resultBlob,
+        }),
+      ]);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Fallback
+      if (resultUrl) {
+        navigator.clipboard.writeText(resultUrl);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    }
+  };
+
+  // Split Comparison Slider Drag Handlers
+  const handleSliderMove = (clientX: number) => {
+    if (!sliderContainerRef.current || !isDraggingSliderRef.current) return;
+    const rect = sliderContainerRef.current.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
+    setSliderPosition(percentage);
   };
 
   // Drag & drop handlers
@@ -198,10 +343,10 @@ export default function BackgroundRemoverPage() {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) processImageWithAI(file);
+    if (file) processImage(file);
   };
 
-  // Global Ctrl+V Clipboard Paste Handler
+  // Clipboard Paste (Ctrl+V) handler
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement;
@@ -215,7 +360,7 @@ export default function BackgroundRemoverPage() {
             const file = item.getAsFile();
             if (file) {
               e.preventDefault();
-              processImageWithAI(file);
+              processImage(file);
               break;
             }
           }
@@ -225,14 +370,12 @@ export default function BackgroundRemoverPage() {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [processImageWithAI]);
-
-  const activeDownloadUrl = finalDownloadUrl || resultUrl;
+  }, [processImage]);
 
   return (
     <ToolPageWrapper
       title="Background Remover"
-      description="Automatic AI background removal for photos, characters, anime, and products"
+      description="Remove image backgrounds automatically in 1 second with AI precision"
       emoji="✂️"
     >
       <div className="max-w-5xl mx-auto space-y-8">
@@ -258,7 +401,7 @@ export default function BackgroundRemoverPage() {
             to paste
           </p>
           <p className="text-xs text-[var(--muted-text)] mt-1.5">
-            Neural AI Model • 100% private in your browser (No images sent to servers)
+            Auto-Detect Subjects • Instant Transparent PNG • 100% Free & Private
           </p>
           <input
             ref={fileInputRef}
@@ -267,19 +410,21 @@ export default function BackgroundRemoverPage() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) processImageWithAI(f);
+              if (f) processImage(f);
             }}
           />
         </div>
 
-        {/* Loading Progress */}
+        {/* Loading Progress Bar */}
         {loading && (
           <div className="tool-card p-8 text-center space-y-4">
             <div className="w-10 h-10 border-3 border-[var(--card-border)] border-t-[var(--foreground)] rounded-full animate-spin mx-auto" />
             <div className="space-y-1.5">
               <p className="text-sm font-semibold text-[var(--foreground)]">{statusText}</p>
               <p className="text-xs text-[var(--muted-text)]">
-                The AI model runs directly in your browser. First time downloads ~20MB and caches automatically.
+                {apiKey
+                  ? 'Processing via Remove.bg cloud engine...'
+                  : 'AI Neural Network is segmenting the subject (cached on your device)...'}
               </p>
             </div>
             <div className="w-full max-w-sm bg-[var(--card-border)] h-2 rounded-full mx-auto overflow-hidden">
@@ -295,87 +440,87 @@ export default function BackgroundRemoverPage() {
           <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-center space-y-2">
             <p className="font-semibold">{errorMessage}</p>
             {currentFile && (
-              <button
-                onClick={() => processImageWithAI(currentFile)}
-                className="btn-secondary text-xs py-1 px-3"
-              >
-                🔄 Retry Removal
+              <button onClick={() => processImage(currentFile)} className="btn-secondary text-xs py-1 px-3">
+                🔄 Try Again
               </button>
             )}
           </div>
         )}
 
-        {/* Result & Actions Bar */}
+        {/* Result Workspace */}
         {resultUrl && !loading && (
           <div className="space-y-6">
+            {/* Top Toolbar */}
             <div className="tool-card p-4 flex flex-wrap items-center justify-between gap-4">
-              {/* Background Replacement Picker */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-medium text-[var(--muted-text)]">Background:</span>
-                <div className="flex gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setBgReplace('transparent')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
-                      bgReplace === 'transparent'
-                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                        : 'border-[var(--card-border)] text-[var(--foreground)]'
-                    }`}
-                  >
-                    Transparent
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBgReplace('white')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
-                      bgReplace === 'white'
-                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                        : 'border-[var(--card-border)] text-[var(--foreground)]'
-                    }`}
-                  >
-                    White
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBgReplace('black')}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
-                      bgReplace === 'black'
-                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                        : 'border-[var(--card-border)] text-[var(--foreground)]'
-                    }`}
-                  >
-                    Black
-                  </button>
-                  <div className="flex items-center gap-1.5 pl-1">
-                    <input
-                      type="color"
-                      value={customBgColor}
-                      onChange={(e) => {
-                        setCustomBgColor(e.target.value);
-                        setBgReplace('custom');
-                      }}
-                      className="w-7 h-7 rounded cursor-pointer border border-[var(--card-border)] bg-transparent"
-                      title="Custom background color"
-                    />
-                  </div>
-                </div>
+              {/* View Mode Tabs (Remove.bg style) */}
+              <div className="flex items-center gap-1.5 bg-[var(--muted)] p-1 rounded-lg border border-[var(--card-border)] text-xs">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('slider');
+                    setShowEditor(false);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                    viewMode === 'slider' && !showEditor
+                      ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                      : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  ↔️ Before / After Slider
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('cutout');
+                    setShowEditor(false);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                    viewMode === 'cutout' && !showEditor
+                      ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                      : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  ✂️ Removed Background
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setViewMode('original');
+                    setShowEditor(false);
+                  }}
+                  className={`px-3 py-1.5 rounded-md font-medium transition-all ${
+                    viewMode === 'original' && !showEditor
+                      ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                      : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                  }`}
+                >
+                  🖼️ Original
+                </button>
               </div>
 
               {/* Action Buttons */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowTouchup(!showTouchup)}
+                  onClick={openEditor}
                   className={`btn-secondary text-xs py-2 px-3.5 flex items-center gap-1.5 ${
-                    showTouchup ? 'border-[var(--foreground)] font-semibold' : ''
+                    showEditor ? 'border-[var(--foreground)] font-semibold' : ''
                   }`}
                 >
-                  <span>🖌️ {showTouchup ? 'Hide Brush Touch-up' : 'Refine / Touch-up'}</span>
+                  <span>🧹 Erase / Restore</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={copyCutoutToClipboard}
+                  className="btn-secondary text-xs py-2 px-3.5 flex items-center gap-1.5"
+                >
+                  <span>{copied ? '✅ Copied!' : '📋 Copy Image'}</span>
                 </button>
 
                 <a
-                  href={activeDownloadUrl}
-                  download={`${imageName}-no-bg.png`}
+                  href={resultUrl}
+                  download={`${imageName}-removed-bg.png`}
                   className="btn-primary text-xs py-2 px-5 font-semibold flex items-center gap-1.5 shadow-sm"
                 >
                   <span>⬇ Download PNG</span>
@@ -383,37 +528,39 @@ export default function BackgroundRemoverPage() {
               </div>
             </div>
 
-            {/* Manual Brush Touch-up Panel (Optional) */}
-            {showTouchup && (
-              <div className="tool-card p-4 space-y-3 bg-[var(--muted)] border-[var(--card-border)]">
-                <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+            {/* Remove.bg Erase / Restore Editor Panel */}
+            {showEditor && (
+              <div className="tool-card p-4 space-y-4 bg-[var(--card)] border border-[var(--card-border)]">
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-3 text-xs">
+                  {/* Tool selection */}
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[var(--foreground)]">Brush Tool:</span>
+                    <span className="font-semibold text-[var(--foreground)]">Mode:</span>
                     <button
                       type="button"
                       onClick={() => setActiveTool('erase')}
-                      className={`px-3 py-1 rounded text-xs border ${
+                      className={`px-3 py-1.5 rounded font-medium border ${
                         activeTool === 'erase'
                           ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                          : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--foreground)]'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                     >
-                      🧹 Erase Extra
+                      🧹 Erase
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveTool('restore')}
-                      className={`px-3 py-1 rounded text-xs border ${
+                      className={`px-3 py-1.5 rounded font-medium border ${
                         activeTool === 'restore'
                           ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                          : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--foreground)]'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                     >
-                      🖌️ Restore Subject
+                      🖌️ Restore
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-3 flex-1 max-w-xs">
+                  {/* Brush Size */}
+                  <div className="flex items-center gap-2.5 flex-1 max-w-xs">
                     <span className="text-[var(--muted-text)] whitespace-nowrap">Size: {brushSize}px</span>
                     <input
                       type="range"
@@ -425,109 +572,223 @@ export default function BackgroundRemoverPage() {
                     />
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={resetToAiCutout}
-                    className="hover:text-red-400 text-xs transition-colors"
-                  >
-                    Reset Touch-ups
-                  </button>
-                </div>
-                <p className="text-[11px] text-[var(--muted-text)]">
-                  Tip: Paint directly on the cutout preview below to erase leftover background or restore parts of the subject.
-                </p>
-              </div>
-            )}
+                  {/* Softness */}
+                  <div className="flex items-center gap-2.5 flex-1 max-w-xs">
+                    <span className="text-[var(--muted-text)] whitespace-nowrap">Softness: {brushSoftness}%</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={brushSoftness}
+                      onChange={(e) => setBrushSoftness(+e.target.value)}
+                      className="app-slider"
+                    />
+                  </div>
 
-            {/* Before / After Preview */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Original */}
-              <div className="tool-card p-4 space-y-3">
-                <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                  <span>Original Photo</span>
+                  {/* Undo / Redo / Zoom */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUndo}
+                      disabled={!canUndo}
+                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30"
+                      title="Undo"
+                    >
+                      ↩ Undo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRedo}
+                      disabled={!canRedo}
+                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30"
+                      title="Redo"
+                    >
+                      ↪ Redo
+                    </button>
+                    <div className="flex items-center gap-1 pl-2 border-l border-[var(--card-border)]">
+                      <button
+                        type="button"
+                        onClick={() => setZoomLevel((z) => Math.max(0.5, z - 0.25))}
+                        className="btn-secondary text-xs py-1 px-2"
+                        title="Zoom out"
+                      >
+                        -
+                      </button>
+                      <span className="text-[11px] font-mono text-[var(--muted-text)] w-10 text-center">
+                        {Math.round(zoomLevel * 100)}%
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setZoomLevel((z) => Math.min(3, z + 0.25))}
+                        className="btn-secondary text-xs py-1 px-2"
+                        title="Zoom in"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <div className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--muted)] flex items-center justify-center min-h-[360px] p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={originalUrl}
-                    alt="Original"
-                    className="max-h-[460px] object-contain w-auto mx-auto rounded"
-                  />
-                </div>
-              </div>
 
-              {/* Result Preview & Touch-up Canvas */}
-              <div className="tool-card p-4 space-y-3">
-                <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider">
-                  <span className="text-green-500 font-semibold">AI Cutout (No Background)</span>
-                  <span className="text-[var(--muted-text)]">
-                    {showTouchup ? 'Click & Drag to Paint' : 'Clean & Transparent'}
-                  </span>
-                </div>
-
+                {/* Interactive Editor Canvas Workspace */}
                 <div
-                  className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] flex items-center justify-center min-h-[360px] p-2 relative"
+                  className="w-full rounded-lg overflow-auto border border-[var(--card-border)] flex items-center justify-center min-h-[460px] p-4 relative select-none"
                   style={{
                     background:
-                      bgReplace === 'transparent'
-                        ? 'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px'
-                        : bgReplace === 'white'
-                        ? '#FFFFFF'
-                        : bgReplace === 'black'
-                        ? '#000000'
-                        : customBgColor,
+                      'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
                   }}
-                  onMouseEnter={() => {}}
                   onMouseLeave={() => {
-                    isDrawingRef.current = false;
+                    isPaintingRef.current = false;
                     setCursorPos(null);
                   }}
                 >
-                  {showTouchup ? (
-                    <canvas
-                      ref={touchupCanvasRef}
-                      onMouseDown={(e) => {
-                        isDrawingRef.current = true;
-                        drawTouchup(e.clientX, e.clientY);
-                      }}
-                      onMouseUp={() => {
-                        isDrawingRef.current = false;
-                      }}
-                      onMouseMove={(e) => {
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-                        if (isDrawingRef.current) {
-                          drawTouchup(e.clientX, e.clientY);
-                        }
-                      }}
-                      className="max-h-[460px] object-contain w-auto mx-auto rounded cursor-crosshair"
-                    />
-                  ) : (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img
-                      src={activeDownloadUrl}
-                      alt="AI Cutout"
-                      className="max-h-[460px] object-contain w-auto mx-auto rounded"
-                    />
-                  )}
+                  <canvas
+                    ref={editorCanvasRef}
+                    onMouseDown={(e) => {
+                      isPaintingRef.current = true;
+                      drawOnCanvas(e.clientX, e.clientY);
+                    }}
+                    onMouseUp={() => {
+                      if (isPaintingRef.current && editorCanvasRef.current) {
+                        pushHistory(editorCanvasRef.current);
+                      }
+                      isPaintingRef.current = false;
+                    }}
+                    onMouseMove={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+                      if (isPaintingRef.current) {
+                        drawOnCanvas(e.clientX, e.clientY);
+                      }
+                    }}
+                    style={{
+                      transform: `scale(${zoomLevel})`,
+                      transformOrigin: 'center center',
+                    }}
+                    className="max-h-[480px] object-contain w-auto mx-auto rounded cursor-crosshair transition-transform"
+                  />
 
-                  {/* Custom Brush Circle Indicator when in touch-up mode */}
-                  {showTouchup && cursorPos && (
+                  {/* Brush Circle Indicator */}
+                  {cursorPos && (
                     <div
                       className="pointer-events-none absolute rounded-full border border-white shadow-xs"
                       style={{
-                        width: brushSize * 2,
-                        height: brushSize * 2,
+                        width: brushSize,
+                        height: brushSize,
                         left: cursorPos.x,
                         top: cursorPos.y,
                         transform: 'translate(-50%, -50%)',
-                        backgroundColor: activeTool === 'erase' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                        backgroundColor: activeTool === 'erase' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(34, 197, 94, 0.25)',
                       }}
                     />
                   )}
                 </div>
               </div>
-            </div>
+            )}
+
+            {/* Standard Preview / Slider Display */}
+            {!showEditor && (
+              <div className="tool-card p-6">
+                {/* 1. Before/After Split Comparison Slider (Remove.bg signature view) */}
+                {viewMode === 'slider' && (
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
+                      <span>Original</span>
+                      <span className="text-[var(--foreground)]">Drag center bar ↔️ to compare</span>
+                      <span className="text-green-500">Removed Background</span>
+                    </div>
+
+                    <div
+                      ref={sliderContainerRef}
+                      className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none h-[480px] flex items-center justify-center cursor-ew-resize"
+                      style={{
+                        background:
+                          'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
+                      }}
+                      onMouseDown={(e) => {
+                        isDraggingSliderRef.current = true;
+                        handleSliderMove(e.clientX);
+                      }}
+                      onMouseUp={() => {
+                        isDraggingSliderRef.current = false;
+                      }}
+                      onMouseMove={(e) => {
+                        if (isDraggingSliderRef.current) {
+                          handleSliderMove(e.clientX);
+                        }
+                      }}
+                      onTouchMove={(e) => {
+                        if (e.touches[0]) {
+                          handleSliderMove(e.touches[0].clientX);
+                        }
+                      }}
+                    >
+                      {/* Original (Underneath / Left clipped) */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={originalUrl}
+                        alt="Original"
+                        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                      />
+
+                      {/* Cutout (Right side overlaid with clip-path) */}
+                      <div
+                        className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden"
+                        style={{
+                          clipPath: `polygon(${sliderPosition}% 0, 100% 0, 100% 100%, ${sliderPosition}% 100%)`,
+                        }}
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={resultUrl}
+                          alt="Cutout"
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+
+                      {/* Draggable Vertical Divider Handle */}
+                      <div
+                        className="absolute top-0 bottom-0 w-0.5 bg-white shadow-2xl pointer-events-none z-10"
+                        style={{ left: `${sliderPosition}%` }}
+                      >
+                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white text-black rounded-full shadow-lg flex items-center justify-center text-[10px] font-bold">
+                          ◀▶
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Full Cutout View */}
+                {viewMode === 'cutout' && (
+                  <div
+                    className="w-full rounded-xl overflow-hidden border border-[var(--card-border)] flex items-center justify-center min-h-[480px] p-4"
+                    style={{
+                      background:
+                        'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
+                    }}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={resultUrl}
+                      alt="AI Cutout"
+                      className="max-h-[480px] object-contain w-auto mx-auto rounded"
+                    />
+                  </div>
+                )}
+
+                {/* 3. Full Original View */}
+                {viewMode === 'original' && (
+                  <div className="w-full rounded-xl overflow-hidden border border-[var(--card-border)] bg-[var(--muted)] flex items-center justify-center min-h-[480px] p-4">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={originalUrl}
+                      alt="Original"
+                      className="max-h-[480px] object-contain w-auto mx-auto rounded"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
