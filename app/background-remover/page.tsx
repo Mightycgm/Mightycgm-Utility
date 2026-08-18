@@ -8,6 +8,80 @@ interface HistoryState {
   imageData: ImageData;
 }
 
+// Fast Queue-based Flood Fill for Magic Eraser
+function floodFillErase(
+  canvas: HTMLCanvasElement,
+  startX: number,
+  startY: number,
+  tolerancePercent: number
+) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const width = canvas.width;
+  const height = canvas.height;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  const startIndex = (startY * width + startX) * 4;
+  const targetR = data[startIndex];
+  const targetG = data[startIndex + 1];
+  const targetB = data[startIndex + 2];
+  const targetA = data[startIndex + 3];
+
+  if (targetA === 0) return; // Already transparent
+
+  const maxDist = 441.67;
+  const tolDist = (tolerancePercent / 100) * maxDist;
+
+  const visited = new Uint8Array(width * height);
+  const queue: number[] = [startX + startY * width];
+  visited[startX + startY * width] = 1;
+
+  while (queue.length > 0) {
+    const idx = queue.pop()!;
+    const px = idx % width;
+    const py = Math.floor(idx / width);
+    const dataIdx = idx * 4;
+
+    const r = data[dataIdx];
+    const g = data[dataIdx + 1];
+    const b = data[dataIdx + 2];
+    const a = data[dataIdx + 3];
+
+    if (a > 0) {
+      const dr = r - targetR;
+      const dg = g - targetG;
+      const db = b - targetB;
+      const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+
+      if (dist <= tolDist) {
+        data[dataIdx + 3] = 0; // Erase pixel
+
+        // Check 4-connected neighbours
+        if (px > 0 && !visited[idx - 1]) {
+          visited[idx - 1] = 1;
+          queue.push(idx - 1);
+        }
+        if (px < width - 1 && !visited[idx + 1]) {
+          visited[idx + 1] = 1;
+          queue.push(idx + 1);
+        }
+        if (py > 0 && !visited[idx - width]) {
+          visited[idx - width] = 1;
+          queue.push(idx - width);
+        }
+        if (py < height - 1 && !visited[idx + width]) {
+          visited[idx + width] = 1;
+          queue.push(idx + width);
+        }
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
 export default function BackgroundRemoverPage() {
   const [originalUrl, setOriginalUrl] = useState<string>('');
   const [resultUrl, setResultUrl] = useState<string>('');
@@ -27,13 +101,14 @@ export default function BackgroundRemoverPage() {
   const [sliderPosition, setSliderPosition] = useState<number>(50);
   const isDraggingSliderRef = useRef(false);
 
-  // Erase / Restore Editor (Remove.bg style)
+  // Erase / Restore / Magic Eraser Editor
   const [showEditor, setShowEditor] = useState(false);
-  const [activeTool, setActiveTool] = useState<'erase' | 'restore'>('erase');
-  const [brushSize, setBrushSize] = useState<number>(28);
+  const [activeTool, setActiveTool] = useState<'erase' | 'restore' | 'magic'>('erase');
+  const [brushSize, setBrushSize] = useState<number>(30);
   const [brushSoftness, setBrushSoftness] = useState<number>(20);
+  const [magicTolerance, setMagicTolerance] = useState<number>(20);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number } | null>(null);
+  const [clientCursor, setClientCursor] = useState<{ x: number; y: number } | null>(null);
 
   // Undo / Redo Stacks
   const [canUndo, setCanUndo] = useState(false);
@@ -82,13 +157,13 @@ export default function BackgroundRemoverPage() {
     if (!ctx) return;
     const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
     undoStackRef.current.push({ imageData: imgData });
-    if (undoStackRef.current.length > 20) undoStackRef.current.shift();
+    if (undoStackRef.current.length > 25) undoStackRef.current.shift();
     redoStackRef.current = [];
     setCanUndo(true);
     setCanRedo(false);
   };
 
-  const handleUndo = () => {
+  const handleUndo = useCallback(() => {
     const canvas = editorCanvasRef.current;
     if (!canvas || undoStackRef.current.length <= 1) return;
 
@@ -107,9 +182,9 @@ export default function BackgroundRemoverPage() {
 
     setCanUndo(undoStackRef.current.length > 1);
     setCanRedo(true);
-  };
+  }, []);
 
-  const handleRedo = () => {
+  const handleRedo = useCallback(() => {
     const canvas = editorCanvasRef.current;
     if (!canvas || redoStackRef.current.length === 0) return;
 
@@ -126,7 +201,32 @@ export default function BackgroundRemoverPage() {
 
     setCanUndo(true);
     setCanRedo(redoStackRef.current.length > 0);
-  };
+  }, []);
+
+  // Global Keyboard Shortcuts (Ctrl+Z for Undo, Ctrl+Y / Ctrl+Shift+Z for Redo)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   // Main Background Removal Process (High-Speed Local Neural AI)
   const processImage = useCallback(async (file: File) => {
@@ -167,7 +267,6 @@ export default function BackgroundRemoverPage() {
       setStatusText('Removing background...');
       setProgressPercent(40);
 
-      // Quantized ISNet neural model runs in 1024x1024 space for instant speed and 100% precision
       let blob: Blob;
       try {
         blob = await removeBackground(file, {
@@ -256,10 +355,10 @@ export default function BackgroundRemoverPage() {
     }, 50);
   };
 
-  // Erase / Restore Drawing Handler
-  const drawOnCanvas = (clientX: number, clientY: number) => {
+  // Erase / Restore / Magic Wand Canvas Drawing Handler
+  const handleCanvasAction = (clientX: number, clientY: number) => {
     const canvas = editorCanvasRef.current;
-    if (!canvas || !isPaintingRef.current) return;
+    if (!canvas) return;
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -268,8 +367,22 @@ export default function BackgroundRemoverPage() {
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
 
+    if (activeTool === 'magic') {
+      // Magic Eraser: Instant Connected Color Region Flood-Fill
+      const targetX = Math.floor(Math.max(0, Math.min(canvas.width - 1, x)));
+      const targetY = Math.floor(Math.max(0, Math.min(canvas.height - 1, y)));
+      floodFillErase(canvas, targetX, targetY, magicTolerance);
+      pushHistory(canvas);
+      const dataUrl = canvas.toDataURL('image/png');
+      setResultUrl(dataUrl);
+      canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
+      return;
+    }
+
+    if (!isPaintingRef.current) return;
+
     const ctx = canvas.getContext('2d')!;
-    const actualRadius = (brushSize / 2) * (canvas.width / 400);
+    const actualRadius = (brushSize / 2) * scaleX;
 
     ctx.save();
 
@@ -453,7 +566,7 @@ export default function BackgroundRemoverPage() {
           <div className="space-y-6">
             {/* Top Toolbar */}
             <div className="tool-card p-4 flex flex-wrap items-center justify-between gap-4">
-              {/* View Mode Tabs (Remove.bg style) */}
+              {/* View Mode Tabs */}
               <div className="flex items-center gap-1.5 bg-[var(--muted)] p-1 rounded-lg border border-[var(--card-border)] text-xs">
                 <button
                   type="button"
@@ -529,13 +642,13 @@ export default function BackgroundRemoverPage() {
               </div>
             </div>
 
-            {/* Remove.bg Erase / Restore Editor Panel */}
+            {/* Remove.bg Erase / Restore / Magic Eraser Editor Panel */}
             {showEditor && (
               <div className="tool-card p-4 space-y-4 bg-[var(--card)] border border-[var(--card-border)]">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-3 text-xs">
                   {/* Tool selection */}
-                  <div className="flex items-center gap-2">
-                    <span className="font-semibold text-[var(--foreground)]">Mode:</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-semibold text-[var(--foreground)] mr-1">Tool:</span>
                     <button
                       type="button"
                       onClick={() => setActiveTool('erase')}
@@ -545,7 +658,7 @@ export default function BackgroundRemoverPage() {
                           : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                     >
-                      🧹 Erase
+                      🧹 Erase Brush
                     </button>
                     <button
                       type="button"
@@ -558,33 +671,62 @@ export default function BackgroundRemoverPage() {
                     >
                       🖌️ Restore
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTool('magic')}
+                      className={`px-3 py-1.5 rounded font-medium border ${
+                        activeTool === 'magic'
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
+                      }`}
+                      title="Click on any connected background color region to erase it in 1 click"
+                    >
+                      🪄 Magic Eraser
+                    </button>
                   </div>
 
-                  {/* Brush Size */}
-                  <div className="flex items-center gap-2.5 flex-1 max-w-xs">
-                    <span className="text-[var(--muted-text)] whitespace-nowrap">Size: {brushSize}px</span>
-                    <input
-                      type="range"
-                      min={6}
-                      max={80}
-                      value={brushSize}
-                      onChange={(e) => setBrushSize(+e.target.value)}
-                      className="app-slider"
-                    />
-                  </div>
+                  {/* Magic Tolerance or Brush Sliders */}
+                  {activeTool === 'magic' ? (
+                    <div className="flex items-center gap-2.5 flex-1 max-w-xs">
+                      <span className="text-[var(--muted-text)] whitespace-nowrap">Tolerance: {magicTolerance}%</span>
+                      <input
+                        type="range"
+                        min={1}
+                        max={80}
+                        value={magicTolerance}
+                        onChange={(e) => setMagicTolerance(+e.target.value)}
+                        className="app-slider"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      {/* Brush Size */}
+                      <div className="flex items-center gap-2.5 flex-1 max-w-xs">
+                        <span className="text-[var(--muted-text)] whitespace-nowrap">Size: {brushSize}px</span>
+                        <input
+                          type="range"
+                          min={6}
+                          max={100}
+                          value={brushSize}
+                          onChange={(e) => setBrushSize(+e.target.value)}
+                          className="app-slider"
+                        />
+                      </div>
 
-                  {/* Softness */}
-                  <div className="flex items-center gap-2.5 flex-1 max-w-xs">
-                    <span className="text-[var(--muted-text)] whitespace-nowrap">Softness: {brushSoftness}%</span>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={brushSoftness}
-                      onChange={(e) => setBrushSoftness(+e.target.value)}
-                      className="app-slider"
-                    />
-                  </div>
+                      {/* Softness */}
+                      <div className="flex items-center gap-2.5 flex-1 max-w-xs">
+                        <span className="text-[var(--muted-text)] whitespace-nowrap">Softness: {brushSoftness}%</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={100}
+                          value={brushSoftness}
+                          onChange={(e) => setBrushSoftness(+e.target.value)}
+                          className="app-slider"
+                        />
+                      </div>
+                    </>
+                  )}
 
                   {/* Undo / Redo / Zoom */}
                   <div className="flex items-center gap-2">
@@ -592,19 +734,21 @@ export default function BackgroundRemoverPage() {
                       type="button"
                       onClick={handleUndo}
                       disabled={!canUndo}
-                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30"
-                      title="Undo"
+                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30 flex items-center gap-1"
+                      title="Undo (Ctrl + Z)"
                     >
-                      ↩ Undo
+                      <span>↩ Undo</span>
+                      <kbd className="opacity-60 text-[10px]">Ctrl+Z</kbd>
                     </button>
                     <button
                       type="button"
                       onClick={handleRedo}
                       disabled={!canRedo}
-                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30"
-                      title="Redo"
+                      className="btn-secondary text-xs py-1 px-2.5 disabled:opacity-30 flex items-center gap-1"
+                      title="Redo (Ctrl + Y)"
                     >
-                      ↪ Redo
+                      <span>↪ Redo</span>
+                      <kbd className="opacity-60 text-[10px]">Ctrl+Y</kbd>
                     </button>
                     <div className="flex items-center gap-1 pl-2 border-l border-[var(--card-border)]">
                       <button
@@ -639,14 +783,21 @@ export default function BackgroundRemoverPage() {
                   }}
                   onMouseLeave={() => {
                     isPaintingRef.current = false;
-                    setCursorPos(null);
+                    setClientCursor(null);
                   }}
                 >
                   <canvas
                     ref={editorCanvasRef}
+                    onClick={(e) => {
+                      if (activeTool === 'magic') {
+                        handleCanvasAction(e.clientX, e.clientY);
+                      }
+                    }}
                     onMouseDown={(e) => {
-                      isPaintingRef.current = true;
-                      drawOnCanvas(e.clientX, e.clientY);
+                      if (activeTool !== 'magic') {
+                        isPaintingRef.current = true;
+                        handleCanvasAction(e.clientX, e.clientY);
+                      }
                     }}
                     onMouseUp={() => {
                       if (isPaintingRef.current && editorCanvasRef.current) {
@@ -655,41 +806,43 @@ export default function BackgroundRemoverPage() {
                       isPaintingRef.current = false;
                     }}
                     onMouseMove={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-                      if (isPaintingRef.current) {
-                        drawOnCanvas(e.clientX, e.clientY);
+                      setClientCursor({ x: e.clientX, y: e.clientY });
+                      if (isPaintingRef.current && activeTool !== 'magic') {
+                        handleCanvasAction(e.clientX, e.clientY);
                       }
                     }}
                     style={{
                       transform: `scale(${zoomLevel})`,
                       transformOrigin: 'center center',
                     }}
-                    className="max-h-[480px] object-contain w-auto mx-auto rounded cursor-crosshair transition-transform"
+                    className={`max-h-[480px] object-contain w-auto mx-auto rounded transition-transform ${
+                      activeTool === 'magic' ? 'cursor-crosshair' : 'cursor-none'
+                    }`}
                   />
-
-                  {/* Brush Circle Indicator */}
-                  {cursorPos && (
-                    <div
-                      className="pointer-events-none absolute rounded-full border border-white shadow-xs"
-                      style={{
-                        width: brushSize,
-                        height: brushSize,
-                        left: cursorPos.x,
-                        top: cursorPos.y,
-                        transform: 'translate(-50%, -50%)',
-                        backgroundColor: activeTool === 'erase' ? 'rgba(239, 68, 68, 0.25)' : 'rgba(34, 197, 94, 0.25)',
-                      }}
-                    />
-                  )}
                 </div>
               </div>
+            )}
+
+            {/* Custom Fixed Viewport Brush Circle Indicator (100% physically aligned under mouse) */}
+            {showEditor && clientCursor && activeTool !== 'magic' && (
+              <div
+                className="pointer-events-none fixed rounded-full border-2 border-white shadow-md z-50 transition-none"
+                style={{
+                  width: brushSize,
+                  height: brushSize,
+                  left: clientCursor.x,
+                  top: clientCursor.y,
+                  transform: 'translate(-50%, -50%)',
+                  backgroundColor:
+                    activeTool === 'erase' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(34, 197, 94, 0.3)',
+                }}
+              />
             )}
 
             {/* Standard Preview / Slider Display */}
             {!showEditor && (
               <div className="tool-card p-6">
-                {/* 1. Before/After Split Comparison Slider (Remove.bg signature view) */}
+                {/* 1. Before/After Split Comparison Slider */}
                 {viewMode === 'slider' && (
                   <div className="space-y-3">
                     <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
