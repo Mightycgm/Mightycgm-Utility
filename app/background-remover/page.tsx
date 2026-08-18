@@ -2,317 +2,206 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
-type ProcessingMode = 'auto' | 'ai' | 'manual';
-
-interface RgbColor {
-  r: number;
-  g: number;
-  b: number;
-}
-
-// Sample corner pixels to auto-detect background color
-function detectDominantCornerColor(ctx: CanvasRenderingContext2D, width: number, height: number): RgbColor {
-  const samplePoints = [
-    [0, 0],
-    [width - 1, 0],
-    [0, height - 1],
-    [width - 1, height - 1],
-    [Math.floor(width / 2), 0],
-    [Math.floor(width / 2), height - 1],
-    [0, Math.floor(height / 2)],
-    [width - 1, Math.floor(height / 2)],
-  ];
-
-  let totalR = 0;
-  let totalG = 0;
-  let totalB = 0;
-  let count = 0;
-
-  for (const [x, y] of samplePoints) {
-    try {
-      const pixel = ctx.getImageData(x, y, 1, 1).data;
-      // Exclude already transparent pixels
-      if (pixel[3] > 10) {
-        totalR += pixel[0];
-        totalG += pixel[1];
-        totalB += pixel[2];
-        count++;
-      }
-    } catch {
-      // Ignore
-    }
-  }
-
-  if (count === 0) return { r: 255, g: 255, b: 255 };
-  return {
-    r: Math.round(totalR / count),
-    g: Math.round(totalG / count),
-    b: Math.round(totalB / count),
-  };
-}
-
-// Color distance Euclidean
-function colorDist(r1: number, g1: number, b1: number, r2: number, g2: number, b2: number): number {
-  const dr = r1 - r2;
-  const dg = g1 - g2;
-  const db = b1 - b2;
-  return Math.sqrt(dr * dr + dg * dg + db * db);
+interface BrushPoint {
+  x: number;
+  y: number;
 }
 
 export default function BackgroundRemoverPage() {
   const [originalUrl, setOriginalUrl] = useState<string>('');
   const [resultUrl, setResultUrl] = useState<string>('');
   const [imageName, setImageName] = useState('image');
-  const [mode, setMode] = useState<ProcessingMode>('auto');
   const [loading, setLoading] = useState(false);
   const [statusText, setStatusText] = useState('');
   const [progressPercent, setProgressPercent] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [dragging, setDragging] = useState(false);
 
-  // Settings
-  const [tolerance, setTolerance] = useState<number>(35);
-  const [feather, setFeather] = useState<number>(15);
-  const [keyColor, setKeyColor] = useState<RgbColor>({ r: 255, g: 255, b: 255 });
   const [bgReplace, setBgReplace] = useState<'transparent' | 'white' | 'black' | 'custom'>('transparent');
   const [customBgColor, setCustomBgColor] = useState('#3b82f6');
-  
-  // Brush Tool
-  const [activeTool, setActiveTool] = useState<'wand' | 'erase' | 'restore'>('wand');
-  const [brushSize, setBrushSize] = useState<number>(24);
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
+  const [finalDownloadUrl, setFinalDownloadUrl] = useState<string>('');
 
-  // Canvas Refs
+  // Manual Touch-up Tools
+  const [showTouchup, setShowTouchup] = useState(false);
+  const [activeTool, setActiveTool] = useState<'erase' | 'restore'>('erase');
+  const [brushSize, setBrushSize] = useState<number>(30);
+  const [cursorPos, setCursorPos] = useState<BrushPoint | null>(null);
+
+  // Refs
   const sourceImageRef = useRef<HTMLImageElement | null>(null);
-  const mainCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const resultImageRef = useRef<HTMLImageElement | null>(null);
+  const touchupCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Apply Fast Auto / Color Key Matting algorithm (< 30ms on full image)
-  const applyColorKeying = useCallback(
-    (targetColor: RgbColor, tol: number, fth: number) => {
-      const img = sourceImageRef.current;
-      if (!img || !mainCanvasRef.current) return;
-
-      const canvas = mainCanvasRef.current;
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0);
-
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      const len = data.length;
-
-      const { r: kr, g: kg, b: kb } = targetColor;
-      const maxDistance = 441.67; // max distance between (0,0,0) and (255,255,255)
-      const tolDist = (tol / 100) * maxDistance;
-      const fthDist = (fth / 100) * maxDistance;
-
-      for (let i = 0; i < len; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const a = data[i + 3];
-
-        if (a === 0) continue;
-
-        const d = colorDist(r, g, b, kr, kg, kb);
-
-        if (d <= tolDist) {
-          // Fully transparent
-          data[i + 3] = 0;
-        } else if (d < tolDist + fthDist && fthDist > 0) {
-          // Feathered edge transition
-          const factor = (d - tolDist) / fthDist;
-          data[i + 3] = Math.round(a * factor);
-        }
-      }
-
-      ctx.putImageData(imgData, 0, 0);
-
-      // Handle custom solid background replacement if selected
-      if (bgReplace !== 'transparent') {
-        const outCanvas = document.createElement('canvas');
-        outCanvas.width = canvas.width;
-        outCanvas.height = canvas.height;
-        const outCtx = outCanvas.getContext('2d')!;
-
-        outCtx.fillStyle =
-          bgReplace === 'white' ? '#FFFFFF' : bgReplace === 'black' ? '#000000' : customBgColor;
-        outCtx.fillRect(0, 0, outCanvas.width, outCanvas.height);
-        outCtx.drawImage(canvas, 0, 0);
-
-        setResultUrl(outCanvas.toDataURL('image/png'));
-      } else {
-        setResultUrl(canvas.toDataURL('image/png'));
-      }
-    },
-    [bgReplace, customBgColor]
-  );
-
-  // Process uploaded image
-  const processImageFile = useCallback(
-    (file: File) => {
-      if (!file.type.startsWith('image/')) {
-        setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
-        return;
-      }
-
-      setErrorMessage('');
-      setResultUrl('');
-      setImageName(file.name.replace(/\.[^/.]+$/, ''));
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const src = e.target?.result as string;
-        setOriginalUrl(src);
-
-        const img = new Image();
-        img.onload = () => {
-          sourceImageRef.current = img;
-
-          // Prepare canvas and detect background
-          const tempCanvas = document.createElement('canvas');
-          tempCanvas.width = img.naturalWidth;
-          tempCanvas.height = img.naturalHeight;
-          const ctx = tempCanvas.getContext('2d', { willReadFrequently: true })!;
-          ctx.drawImage(img, 0, 0);
-
-          const autoColor = detectDominantCornerColor(ctx, img.naturalWidth, img.naturalHeight);
-          setKeyColor(autoColor);
-
-          // Immediately remove background in < 20ms
-          applyColorKeying(autoColor, tolerance, feather);
-        };
-        img.src = src;
-      };
-      reader.readAsDataURL(file);
-    },
-    [applyColorKeying, tolerance, feather]
-  );
-
-  // Re-apply matting when sliders or background replacement changes
-  useEffect(() => {
-    if (sourceImageRef.current && mode === 'auto') {
-      applyColorKeying(keyColor, tolerance, feather);
+  // Run AI Background Removal (True Semantic Neural Network ISNet)
+  const processImageWithAI = useCallback(async (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      setErrorMessage('Please upload a valid image file (PNG, JPG, WEBP, etc.)');
+      return;
     }
-  }, [tolerance, feather, keyColor, bgReplace, customBgColor, applyColorKeying, mode]);
 
-  // Deep AI Removal with robust error handling and timeout guard
-  const runDeepAiModel = async () => {
-    if (!sourceImageRef.current) return;
-    setLoading(true);
-    setStatusText('Downloading AI model assets...');
-    setProgressPercent(15);
+    setCurrentFile(file);
     setErrorMessage('');
+    setResultUrl('');
+    setLoading(true);
+    setStatusText('Loading AI model...');
+    setProgressPercent(10);
+
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    setImageName(name || 'cutout');
+
+    const previewUrl = URL.createObjectURL(file);
+    setOriginalUrl(previewUrl);
+
+    const origImg = new Image();
+    origImg.onload = () => {
+      sourceImageRef.current = origImg;
+    };
+    origImg.src = previewUrl;
 
     try {
+      // Dynamic import to keep initial bundle ultra fast
       const { removeBackground } = await import('@imgly/background-removal');
-      setStatusText('Processing neural segmentation...');
-      setProgressPercent(40);
 
-      // Create blob from image
-      const res = await fetch(originalUrl);
-      const imageBlob = await res.blob();
+      setStatusText('Processing image with AI...');
+      setProgressPercent(25);
 
-      const outputBlob = await removeBackground(imageBlob, {
+      // Run with isnet_quint8 (quantized fast production model ~20MB, cached in browser)
+      const blob = await removeBackground(file, {
         publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-        progress: (_key: string, cur: number, total: number) => {
+        model: 'isnet_quint8',
+        rescale: true,
+        progress: (key: string, current: number, total: number) => {
           if (total > 0) {
-            const p = Math.min(95, Math.round((cur / total) * 100));
-            setProgressPercent(p);
-            setStatusText(`Processing AI (${p}%)...`);
+            const percent = Math.min(95, Math.round((current / total) * 100));
+            setProgressPercent(percent);
+            if (key.includes('fetch') || key.includes('download')) {
+              setStatusText(`Downloading AI model: ${percent}% (Cached after 1st time)`);
+            } else {
+              setStatusText(`Segmenting subject: ${percent}%`);
+            }
           }
         },
         debug: false,
       });
 
-      const url = URL.createObjectURL(outputBlob);
+      const url = URL.createObjectURL(blob);
       setResultUrl(url);
-      setMode('ai');
+
+      const resImg = new Image();
+      resImg.onload = () => {
+        resultImageRef.current = resImg;
+        // Init touchup canvas with AI result
+        if (touchupCanvasRef.current) {
+          const canvas = touchupCanvasRef.current;
+          canvas.width = resImg.naturalWidth;
+          canvas.height = resImg.naturalHeight;
+          const ctx = canvas.getContext('2d')!;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(resImg, 0, 0);
+        }
+      };
+      resImg.src = url;
+
       setProgressPercent(100);
       setStatusText('');
     } catch (err: unknown) {
-      console.warn('Deep AI fallback to Instant Matting:', err);
-      // Fallback seamlessly to fast instant matting
-      applyColorKeying(keyColor, tolerance, feather);
+      console.error('AI removal failed:', err);
       setErrorMessage(
-        'Deep AI network took too long. Switched seamlessly to Instant Matting mode (100% functional).'
+        err instanceof Error
+          ? `AI Processing error: ${err.message}. Please try another image.`
+          : 'Failed to process image. Please try again.'
       );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  // Canvas Click for Magic Wand (Pick color to remove)
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (activeTool !== 'wand' || !sourceImageRef.current || !mainCanvasRef.current) return;
+  // Synchronize composite download URL when background replacement changes
+  useEffect(() => {
+    if (!resultUrl) {
+      setTimeout(() => setFinalDownloadUrl(''), 0);
+      return;
+    }
 
-    const canvas = mainCanvasRef.current;
+    if (bgReplace === 'transparent') {
+      setTimeout(() => setFinalDownloadUrl(resultUrl), 0);
+      return;
+    }
+
+    const img = touchupCanvasRef.current || resultImageRef.current;
+    if (!img) {
+      setTimeout(() => setFinalDownloadUrl(resultUrl), 0);
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 'naturalWidth' in img ? img.naturalWidth : img.width;
+    canvas.height = 'naturalHeight' in img ? img.naturalHeight : img.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.fillStyle = bgReplace === 'white' ? '#FFFFFF' : bgReplace === 'black' ? '#000000' : customBgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0);
+
+    const dataUrl = canvas.toDataURL('image/png');
+    setTimeout(() => setFinalDownloadUrl(dataUrl), 0);
+  }, [resultUrl, bgReplace, customBgColor]);
+
+  // Touch-up drawing handler
+  const drawTouchup = (clientX: number, clientY: number) => {
+    const canvas = touchupCanvasRef.current;
+    if (!canvas || !isDrawingRef.current) return;
+
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
-    const clickX = Math.floor((e.clientX - rect.left) * scaleX);
-    const clickY = Math.floor((e.clientY - rect.top) * scaleY);
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
 
-    const tempCanvas = document.createElement('canvas');
-    tempCanvas.width = sourceImageRef.current.naturalWidth;
-    tempCanvas.height = sourceImageRef.current.naturalHeight;
-    const ctx = tempCanvas.getContext('2d')!;
-    ctx.drawImage(sourceImageRef.current, 0, 0);
-
-    const pixel = ctx.getImageData(clickX, clickY, 1, 1).data;
-    const picked: RgbColor = { r: pixel[0], g: pixel[1], b: pixel[2] };
-    setKeyColor(picked);
-    applyColorKeying(picked, tolerance, feather);
-  };
-
-  // Canvas Manual Brush (Erase / Restore)
-  const handleBrushMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawingRef.current || !mainCanvasRef.current || activeTool === 'wand') return;
-
-    const canvas = mainCanvasRef.current;
     const ctx = canvas.getContext('2d')!;
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-
-    const x = (e.clientX - rect.left) * scaleX;
-    const y = (e.clientY - rect.top) * scaleY;
-
     ctx.save();
+
     if (activeTool === 'erase') {
       ctx.globalCompositeOperation = 'destination-out';
       ctx.beginPath();
-      ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+      ctx.arc(x, y, brushSize * (canvas.width / 500), 0, Math.PI * 2);
       ctx.fill();
     } else if (activeTool === 'restore' && sourceImageRef.current) {
-      // Restore from original
       ctx.globalCompositeOperation = 'source-over';
-      ctx.save();
       ctx.beginPath();
-      ctx.arc(x, y, brushSize, 0, Math.PI * 2);
+      ctx.arc(x, y, brushSize * (canvas.width / 500), 0, Math.PI * 2);
       ctx.clip();
-      ctx.drawImage(sourceImageRef.current, 0, 0);
-      ctx.restore();
+      ctx.drawImage(sourceImageRef.current, 0, 0, canvas.width, canvas.height);
     }
-    ctx.restore();
 
+    ctx.restore();
     setResultUrl(canvas.toDataURL('image/png'));
   };
 
-  // Drag & drop
+  // Reset touchup to original AI cutout
+  const resetToAiCutout = () => {
+    if (!resultImageRef.current || !touchupCanvasRef.current) return;
+    const canvas = touchupCanvasRef.current;
+    const ctx = canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(resultImageRef.current, 0, 0);
+    setResultUrl(canvas.toDataURL('image/png'));
+  };
+
+  // Drag & drop handlers
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
     const file = e.dataTransfer.files[0];
-    if (file) processImageFile(file);
+    if (file) processImageWithAI(file);
   };
 
-  // Clipboard Paste (Ctrl+V) handler
+  // Global Ctrl+V Clipboard Paste Handler
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement;
@@ -326,7 +215,7 @@ export default function BackgroundRemoverPage() {
             const file = item.getAsFile();
             if (file) {
               e.preventDefault();
-              processImageFile(file);
+              processImageWithAI(file);
               break;
             }
           }
@@ -336,16 +225,18 @@ export default function BackgroundRemoverPage() {
 
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
-  }, [processImageFile]);
+  }, [processImageWithAI]);
+
+  const activeDownloadUrl = finalDownloadUrl || resultUrl;
 
   return (
     <ToolPageWrapper
       title="Background Remover"
-      description="Fast & instant background removal with smart matting and AI precision"
+      description="Automatic AI background removal for photos, characters, anime, and products"
       emoji="✂️"
     >
       <div className="max-w-5xl mx-auto space-y-8">
-        {/* Drop Zone */}
+        {/* Upload Zone */}
         <div
           className={`drop-zone py-12 transition-all ${
             dragging ? 'border-[var(--foreground)] bg-[var(--muted)]' : ''
@@ -367,7 +258,7 @@ export default function BackgroundRemoverPage() {
             to paste
           </p>
           <p className="text-xs text-[var(--muted-text)] mt-1.5">
-            Instant 0-second removal • Supports JPG, PNG, WEBP, AVIF • 100% private in your browser
+            Neural AI Model • 100% private in your browser (No images sent to servers)
           </p>
           <input
             ref={fileInputRef}
@@ -376,17 +267,22 @@ export default function BackgroundRemoverPage() {
             className="hidden"
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) processImageFile(f);
+              if (f) processImageWithAI(f);
             }}
           />
         </div>
 
         {/* Loading Progress */}
         {loading && (
-          <div className="tool-card p-6 text-center space-y-3">
-            <div className="w-9 h-9 border-3 border-[var(--card-border)] border-t-[var(--foreground)] rounded-full animate-spin mx-auto" />
-            <p className="text-sm font-medium text-[var(--foreground)]">{statusText}</p>
-            <div className="w-full max-w-xs bg-[var(--card-border)] h-1.5 rounded-full mx-auto overflow-hidden">
+          <div className="tool-card p-8 text-center space-y-4">
+            <div className="w-10 h-10 border-3 border-[var(--card-border)] border-t-[var(--foreground)] rounded-full animate-spin mx-auto" />
+            <div className="space-y-1.5">
+              <p className="text-sm font-semibold text-[var(--foreground)]">{statusText}</p>
+              <p className="text-xs text-[var(--muted-text)]">
+                The AI model runs directly in your browser. First time downloads ~20MB and caches automatically.
+              </p>
+            </div>
+            <div className="w-full max-w-sm bg-[var(--card-border)] h-2 rounded-full mx-auto overflow-hidden">
               <div
                 className="bg-[var(--foreground)] h-full transition-all duration-300 rounded-full"
                 style={{ width: `${progressPercent}%` }}
@@ -396,213 +292,181 @@ export default function BackgroundRemoverPage() {
         )}
 
         {errorMessage && (
-          <div className="p-3.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs text-center">
-            {errorMessage}
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-center space-y-2">
+            <p className="font-semibold">{errorMessage}</p>
+            {currentFile && (
+              <button
+                onClick={() => processImageWithAI(currentFile)}
+                className="btn-secondary text-xs py-1 px-3"
+              >
+                🔄 Retry Removal
+              </button>
+            )}
           </div>
         )}
 
-        {/* Editor Controls & Result */}
-        {originalUrl && (
+        {/* Result & Actions Bar */}
+        {resultUrl && !loading && (
           <div className="space-y-6">
-            {/* Control Bar */}
-            <div className="tool-card p-5 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                    Engine Mode:
-                  </span>
-                  <div className="flex gap-1 bg-[var(--muted)] p-1 rounded-md border border-[var(--card-border)] text-xs">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMode('auto');
-                        applyColorKeying(keyColor, tolerance, feather);
-                      }}
-                      className={`px-3 py-1 rounded font-medium transition-all ${
-                        mode === 'auto'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
-                          : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
-                      }`}
-                    >
-                      ⚡ Instant Smart Matting (0s)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={runDeepAiModel}
-                      disabled={loading}
-                      className={`px-3 py-1 rounded font-medium transition-all ${
-                        mode === 'ai'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
-                          : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
-                      }`}
-                    >
-                      🤖 Deep AI Neural Mode
-                    </button>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <a
-                    href={resultUrl}
-                    download={`${imageName}-removed-bg.png`}
-                    className="btn-primary text-xs py-2 px-5 font-semibold"
+            <div className="tool-card p-4 flex flex-wrap items-center justify-between gap-4">
+              {/* Background Replacement Picker */}
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-[var(--muted-text)]">Background:</span>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setBgReplace('transparent')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                      bgReplace === 'transparent'
+                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                        : 'border-[var(--card-border)] text-[var(--foreground)]'
+                    }`}
                   >
-                    ⬇ Download PNG Cutout
-                  </a>
+                    Transparent
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBgReplace('white')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                      bgReplace === 'white'
+                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                        : 'border-[var(--card-border)] text-[var(--foreground)]'
+                    }`}
+                  >
+                    White
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBgReplace('black')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium border ${
+                      bgReplace === 'black'
+                        ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                        : 'border-[var(--card-border)] text-[var(--foreground)]'
+                    }`}
+                  >
+                    Black
+                  </button>
+                  <div className="flex items-center gap-1.5 pl-1">
+                    <input
+                      type="color"
+                      value={customBgColor}
+                      onChange={(e) => {
+                        setCustomBgColor(e.target.value);
+                        setBgReplace('custom');
+                      }}
+                      className="w-7 h-7 rounded cursor-pointer border border-[var(--card-border)] bg-transparent"
+                      title="Custom background color"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* Sliders and Tools */}
-              <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                {/* Tolerance */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between">
-                    <span className="text-[var(--muted-text)] font-medium">Tolerance</span>
-                    <span className="font-semibold tabular-nums">{tolerance}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={1}
-                    max={100}
-                    value={tolerance}
-                    onChange={(e) => setTolerance(+e.target.value)}
-                    className="app-slider"
-                  />
-                </div>
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowTouchup(!showTouchup)}
+                  className={`btn-secondary text-xs py-2 px-3.5 flex items-center gap-1.5 ${
+                    showTouchup ? 'border-[var(--foreground)] font-semibold' : ''
+                  }`}
+                >
+                  <span>🖌️ {showTouchup ? 'Hide Brush Touch-up' : 'Refine / Touch-up'}</span>
+                </button>
 
-                {/* Edge Smoothness / Feather */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between">
-                    <span className="text-[var(--muted-text)] font-medium">Edge Smoothness</span>
-                    <span className="font-semibold tabular-nums">{feather}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={50}
-                    value={feather}
-                    onChange={(e) => setFeather(+e.target.value)}
-                    className="app-slider"
-                  />
-                </div>
+                <a
+                  href={activeDownloadUrl}
+                  download={`${imageName}-no-bg.png`}
+                  className="btn-primary text-xs py-2 px-5 font-semibold flex items-center gap-1.5 shadow-sm"
+                >
+                  <span>⬇ Download PNG</span>
+                </a>
+              </div>
+            </div>
 
-                {/* Background Replacement */}
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[var(--muted-text)] font-medium">Replace Background</span>
-                    {bgReplace === 'custom' && (
-                      <input
-                        type="color"
-                        value={customBgColor}
-                        onChange={(e) => setCustomBgColor(e.target.value)}
-                        className="w-5 h-5 rounded cursor-pointer border-0 bg-transparent"
-                        title="Pick custom background color"
-                      />
-                    )}
-                  </div>
-                  <select
-                    className="input-field py-1 text-xs"
-                    value={bgReplace}
-                    onChange={(e) => setBgReplace(e.target.value as 'transparent' | 'white' | 'black' | 'custom')}
-                  >
-                    <option value="transparent">Transparent (PNG)</option>
-                    <option value="white">Solid White</option>
-                    <option value="black">Solid Black</option>
-                    <option value="custom">Custom Color...</option>
-                  </select>
-                </div>
-
-                {/* Interactive Tool Selector */}
-                <div className="space-y-1.5">
-                  <span className="text-[var(--muted-text)] font-medium block">Tool</span>
-                  <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTool('wand')}
-                      className={`flex-1 py-1 px-2 rounded text-xs border ${
-                        activeTool === 'wand'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                          : 'border-[var(--card-border)] text-[var(--muted-text)]'
-                      }`}
-                      title="Click on image to pick color"
-                    >
-                      🪄 Wand
-                    </button>
+            {/* Manual Brush Touch-up Panel (Optional) */}
+            {showTouchup && (
+              <div className="tool-card p-4 space-y-3 bg-[var(--muted)] border-[var(--card-border)]">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-[var(--foreground)]">Brush Tool:</span>
                     <button
                       type="button"
                       onClick={() => setActiveTool('erase')}
-                      className={`flex-1 py-1 px-2 rounded text-xs border ${
+                      className={`px-3 py-1 rounded text-xs border ${
                         activeTool === 'erase'
                           ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                          : 'border-[var(--card-border)] text-[var(--muted-text)]'
+                          : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
-                      title="Manual erase brush"
                     >
-                      🧹 Erase
+                      🧹 Erase Extra
                     </button>
                     <button
                       type="button"
                       onClick={() => setActiveTool('restore')}
-                      className={`flex-1 py-1 px-2 rounded text-xs border ${
+                      className={`px-3 py-1 rounded text-xs border ${
                         activeTool === 'restore'
                           ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
-                          : 'border-[var(--card-border)] text-[var(--muted-text)]'
+                          : 'bg-[var(--card)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
-                      title="Restore original areas"
                     >
-                      🖌️ Restore
+                      🖌️ Restore Subject
                     </button>
                   </div>
+
+                  <div className="flex items-center gap-3 flex-1 max-w-xs">
+                    <span className="text-[var(--muted-text)] whitespace-nowrap">Size: {brushSize}px</span>
+                    <input
+                      type="range"
+                      min={6}
+                      max={80}
+                      value={brushSize}
+                      onChange={(e) => setBrushSize(+e.target.value)}
+                      className="app-slider"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={resetToAiCutout}
+                    className="hover:text-red-400 text-xs transition-colors"
+                  >
+                    Reset Touch-ups
+                  </button>
                 </div>
+                <p className="text-[11px] text-[var(--muted-text)]">
+                  Tip: Paint directly on the cutout preview below to erase leftover background or restore parts of the subject.
+                </p>
               </div>
+            )}
 
-              {/* Brush size if in brush mode */}
-              {activeTool !== 'wand' && (
-                <div className="flex items-center gap-4 pt-2 border-t border-[var(--card-border)] text-xs">
-                  <span className="text-[var(--muted-text)] font-medium">Brush Size: {brushSize}px</span>
-                  <input
-                    type="range"
-                    min={4}
-                    max={80}
-                    value={brushSize}
-                    onChange={(e) => setBrushSize(+e.target.value)}
-                    className="app-slider max-w-xs"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Interactive Preview Canvas */}
+            {/* Before / After Preview */}
             <div className="grid md:grid-cols-2 gap-6">
               {/* Original */}
               <div className="tool-card p-4 space-y-3">
                 <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
                   <span>Original Photo</span>
-                  <span>Click to sample color</span>
                 </div>
-                <div className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--muted)] flex items-center justify-center min-h-[300px]">
+                <div className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] bg-[var(--muted)] flex items-center justify-center min-h-[360px] p-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={originalUrl}
                     alt="Original"
-                    className="max-h-96 object-contain w-full"
+                    className="max-h-[460px] object-contain w-auto mx-auto rounded"
                   />
                 </div>
               </div>
 
-              {/* Result / Interactive Workspace */}
+              {/* Result Preview & Touch-up Canvas */}
               <div className="tool-card p-4 space-y-3">
-                <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                  <span className="text-green-500 font-semibold">Cutout Result</span>
+                <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider">
+                  <span className="text-green-500 font-semibold">AI Cutout (No Background)</span>
                   <span className="text-[var(--muted-text)]">
-                    {activeTool === 'wand'
-                      ? 'Click on preview to re-target color'
-                      : 'Drag on image to paint/erase'}
+                    {showTouchup ? 'Click & Drag to Paint' : 'Clean & Transparent'}
                   </span>
                 </div>
 
                 <div
-                  className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] flex items-center justify-center min-h-[300px]"
+                  className="w-full rounded-lg overflow-hidden border border-[var(--card-border)] flex items-center justify-center min-h-[360px] p-2 relative"
                   style={{
                     background:
                       bgReplace === 'transparent'
@@ -613,24 +477,54 @@ export default function BackgroundRemoverPage() {
                         ? '#000000'
                         : customBgColor,
                   }}
+                  onMouseEnter={() => {}}
+                  onMouseLeave={() => {
+                    isDrawingRef.current = false;
+                    setCursorPos(null);
+                  }}
                 >
-                  <canvas
-                    ref={mainCanvasRef}
-                    onClick={handleCanvasClick}
-                    onMouseDown={() => {
-                      isDrawingRef.current = true;
-                    }}
-                    onMouseUp={() => {
-                      isDrawingRef.current = false;
-                    }}
-                    onMouseLeave={() => {
-                      isDrawingRef.current = false;
-                    }}
-                    onMouseMove={handleBrushMove}
-                    className={`max-h-96 object-contain w-full cursor-${
-                      activeTool === 'wand' ? 'crosshair' : 'pointer'
-                    }`}
-                  />
+                  {showTouchup ? (
+                    <canvas
+                      ref={touchupCanvasRef}
+                      onMouseDown={(e) => {
+                        isDrawingRef.current = true;
+                        drawTouchup(e.clientX, e.clientY);
+                      }}
+                      onMouseUp={() => {
+                        isDrawingRef.current = false;
+                      }}
+                      onMouseMove={(e) => {
+                        const rect = e.currentTarget.getBoundingClientRect();
+                        setCursorPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+                        if (isDrawingRef.current) {
+                          drawTouchup(e.clientX, e.clientY);
+                        }
+                      }}
+                      className="max-h-[460px] object-contain w-auto mx-auto rounded cursor-crosshair"
+                    />
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={activeDownloadUrl}
+                      alt="AI Cutout"
+                      className="max-h-[460px] object-contain w-auto mx-auto rounded"
+                    />
+                  )}
+
+                  {/* Custom Brush Circle Indicator when in touch-up mode */}
+                  {showTouchup && cursorPos && (
+                    <div
+                      className="pointer-events-none absolute rounded-full border border-white shadow-xs"
+                      style={{
+                        width: brushSize * 2,
+                        height: brushSize * 2,
+                        left: cursorPos.x,
+                        top: cursorPos.y,
+                        transform: 'translate(-50%, -50%)',
+                        backgroundColor: activeTool === 'erase' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(34, 197, 94, 0.2)',
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             </div>
