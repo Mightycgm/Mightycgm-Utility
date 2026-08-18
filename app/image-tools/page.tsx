@@ -24,16 +24,22 @@ const SUPPORTED_FORMATS: FormatInfo[] = [
   { id: 'gif', name: 'GIF', ext: 'gif', mime: 'image/gif', lossy: false, desc: 'Standard graphics interchange format' },
 ];
 
-const QUICK_PRESETS = [
-  { from: 'png', to: 'webp', label: 'PNG ⇄ WEBP' },
-  { from: 'jpeg', to: 'png', label: 'JPG ⇄ PNG' },
-  { from: 'webp', to: 'jpeg', label: 'WEBP ⇄ JPG' },
-  { from: 'png', to: 'jpeg', label: 'PNG ⇄ JPG' },
-  { from: 'png', to: 'ico', label: 'PNG ⇄ ICO' },
-  { from: 'svg', to: 'png', label: 'SVG ⇄ PNG' },
-  { from: 'png', to: 'bmp', label: 'PNG ⇄ BMP' },
-  { from: 'jpeg', to: 'webp', label: 'JPG ⇄ WEBP' },
-  { from: 'png', to: 'avif', label: 'PNG ⇄ AVIF' },
+interface PresetPair {
+  id: string;
+  formatA: string;
+  nameA: string;
+  formatB: string;
+  nameB: string;
+}
+
+const PRESET_PAIRS: PresetPair[] = [
+  { id: 'png-webp', formatA: 'png', nameA: 'PNG', formatB: 'webp', nameB: 'WEBP' },
+  { id: 'jpg-png', formatA: 'jpeg', nameA: 'JPG', formatB: 'png', nameB: 'PNG' },
+  { id: 'jpg-webp', formatA: 'jpeg', nameA: 'JPG', formatB: 'webp', nameB: 'WEBP' },
+  { id: 'png-ico', formatA: 'png', nameA: 'PNG', formatB: 'ico', nameB: 'ICO' },
+  { id: 'svg-png', formatA: 'svg', nameA: 'SVG', formatB: 'png', nameB: 'PNG' },
+  { id: 'png-bmp', formatA: 'png', nameA: 'PNG', formatB: 'bmp', nameB: 'BMP' },
+  { id: 'png-avif', formatA: 'png', nameA: 'PNG', formatB: 'avif', nameB: 'AVIF' },
 ];
 
 const ICO_SIZES = [
@@ -200,6 +206,17 @@ export default function ImageToolsPage() {
   // Convert State
   const [items, setItems] = useState<FileItem[]>([]);
   const [globalTargetFormat, setGlobalTargetFormat] = useState<string>('webp');
+  const [activePresetId, setActivePresetId] = useState<string>('png-webp');
+  
+  // Track direction (from ➔ to) for each preset pair button
+  const [presetDirections, setPresetDirections] = useState<Record<string, { from: string; fromName: string; to: string; toName: string }>>(() => {
+    const initial: Record<string, { from: string; fromName: string; to: string; toName: string }> = {};
+    PRESET_PAIRS.forEach((p) => {
+      initial[p.id] = { from: p.formatA, fromName: p.nameA, to: p.formatB, toName: p.nameB };
+    });
+    return initial;
+  });
+
   const [quality, setQuality] = useState<number>(0.9);
   const [scale, setScale] = useState<number>(1);
   const [icoSize, setIcoSize] = useState<number>(0);
@@ -225,7 +242,7 @@ export default function ImageToolsPage() {
     Array.from(fileList).forEach((file) => {
       if (!file.type.startsWith('image/') && !file.name.match(/\.(jpg|jpeg|png|webp|avif|bmp|ico|svg|gif)$/i)) return;
       const detected = detectFormat(file);
-      // Auto pick reasonable target format if same as source
+      // Auto pick target format if same as source
       let target = globalTargetFormat;
       if (detected === globalTargetFormat) {
         target = detected === 'webp' ? 'png' : detected === 'png' ? 'webp' : 'png';
@@ -348,45 +365,113 @@ export default function ImageToolsPage() {
     setIsConvertingAll(false);
   };
 
-  // Swap Source and Target format
+  // Preset Button Click (Selects preset or Swaps if already active)
+  const handlePresetClick = (preset: PresetPair) => {
+    setPresetDirections((prev) => {
+      const current = prev[preset.id] || { from: preset.formatA, fromName: preset.nameA, to: preset.formatB, toName: preset.nameB };
+
+      if (activePresetId === preset.id) {
+        // Swap direction inside this button
+        const swapped = {
+          from: current.to,
+          fromName: current.toName,
+          to: current.from,
+          toName: current.fromName,
+        };
+        setGlobalTargetFormat(swapped.to);
+        if (items.length > 0) {
+          setItems((prevItems) =>
+            prevItems.map((item) => ({
+              ...item,
+              targetFormat: swapped.to,
+              status: 'idle',
+            }))
+          );
+        }
+        return { ...prev, [preset.id]: swapped };
+      } else {
+        // Activate this preset
+        setActivePresetId(preset.id);
+        setGlobalTargetFormat(current.to);
+        if (items.length > 0) {
+          setItems((prevItems) =>
+            prevItems.map((item) => ({
+              ...item,
+              targetFormat: current.to,
+              status: 'idle',
+            }))
+          );
+        }
+        return prev;
+      }
+    });
+  };
+
+  // Swap Source and Target format (Swaps the active button's direction)
   const handleSwapFormats = () => {
-    // Determine the most common source format in current items or default
-    const dominantSource = items.length > 0 ? items[0].sourceFormat : 'png';
-    const currentTarget = globalTargetFormat;
+    if (activePresetId && presetDirections[activePresetId]) {
+      setPresetDirections((prev) => {
+        const current = prev[activePresetId];
+        const swapped = {
+          from: current.to,
+          fromName: current.toName,
+          to: current.from,
+          toName: current.fromName,
+        };
+        setGlobalTargetFormat(swapped.to);
+        if (items.length > 0) {
+          setItems((prevItems) =>
+            prevItems.map((item) => ({
+              ...item,
+              targetFormat: swapped.to,
+              status: 'idle',
+            }))
+          );
+        }
+        return { ...prev, [activePresetId]: swapped };
+      });
+    } else {
+      const dominantSource = items.length > 0 ? items[0].sourceFormat : 'png';
+      const currentTarget = globalTargetFormat;
+      const newTarget = dominantSource === currentTarget ? (currentTarget === 'webp' ? 'png' : 'webp') : dominantSource;
+      setGlobalTargetFormat(newTarget);
 
-    // New target becomes dominant source, and items get swapped target
-    const newTarget = dominantSource === currentTarget ? (currentTarget === 'webp' ? 'png' : 'webp') : dominantSource;
-    setGlobalTargetFormat(newTarget);
-
-    if (items.length > 0) {
-      setItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          targetFormat: item.targetFormat === newTarget ? item.sourceFormat : newTarget,
-          status: 'idle',
-        }))
-      );
+      if (items.length > 0) {
+        setItems((prev) =>
+          prev.map((item) => ({
+            ...item,
+            targetFormat: item.targetFormat === newTarget ? item.sourceFormat : newTarget,
+            status: 'idle',
+          }))
+        );
+      }
     }
   };
 
-  // Apply Quick Preset (e.g. PNG ⇄ WEBP)
-  const applyPreset = (preset: { from: string; to: string }) => {
-    setGlobalTargetFormat(preset.to);
-    if (items.length > 0) {
-      setItems((prev) =>
-        prev.map((item) => {
-          let target = preset.to;
-          // If item is already the target, swap to the 'from' format
-          if (item.sourceFormat === preset.to) {
-            target = preset.from;
-          }
+  // Dropdown Target Format change
+  const handleGlobalFormatChange = (newFmt: string) => {
+    setGlobalTargetFormat(newFmt);
+    setItems((prev) => prev.map((item) => ({ ...item, targetFormat: newFmt, status: 'idle' })));
+
+    // Match or align active preset
+    const matched = PRESET_PAIRS.find((p) => p.formatA === newFmt || p.formatB === newFmt);
+    if (matched) {
+      setActivePresetId(matched.id);
+      setPresetDirections((prev) => {
+        const current = prev[matched.id];
+        if (current && current.to !== newFmt) {
           return {
-            ...item,
-            targetFormat: target,
-            status: 'idle',
+            ...prev,
+            [matched.id]: {
+              from: current.to,
+              fromName: current.toName,
+              to: current.from,
+              toName: current.fromName,
+            },
           };
-        })
-      );
+        }
+        return prev;
+      });
     }
   };
 
@@ -495,22 +580,34 @@ export default function ImageToolsPage() {
               <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
                 Quick Swap & Convert Presets
               </span>
-              <span className="text-xs text-[var(--muted-text)]">Click to quickly switch format pair</span>
+              <span className="text-xs text-[var(--muted-text)]">Click active button to swap direction (⇄)</span>
             </div>
             <div className="flex flex-wrap gap-2">
-              {QUICK_PRESETS.map((preset) => {
-                const isActive = globalTargetFormat === preset.to;
+              {PRESET_PAIRS.map((preset) => {
+                const dir = presetDirections[preset.id] || {
+                  from: preset.formatA,
+                  fromName: preset.nameA,
+                  to: preset.formatB,
+                  toName: preset.nameB,
+                };
+                const isActive = activePresetId === preset.id && globalTargetFormat === dir.to;
+
                 return (
                   <button
-                    key={preset.label}
-                    onClick={() => applyPreset(preset)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handlePresetClick(preset)}
+                    className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer select-none ${
                       isActive
                         ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
                         : 'bg-[var(--card)] border border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
                     }`}
+                    title={`Convert ${dir.fromName} ➔ ${dir.toName}. Click again to swap to ${dir.toName} ➔ ${dir.fromName}.`}
                   >
-                    {preset.label}
+                    <span>
+                      {dir.fromName} ➔ {dir.toName}
+                    </span>
+                    <span className="opacity-60 text-[10px]">⇄</span>
                   </button>
                 );
               })}
@@ -554,11 +651,7 @@ export default function ImageToolsPage() {
                   <select
                     className="input-field py-1.5 text-sm font-medium w-auto cursor-pointer"
                     value={globalTargetFormat}
-                    onChange={(e) => {
-                      const newFmt = e.target.value;
-                      setGlobalTargetFormat(newFmt);
-                      setItems((prev) => prev.map((item) => ({ ...item, targetFormat: newFmt, status: 'idle' })));
-                    }}
+                    onChange={(e) => handleGlobalFormatChange(e.target.value)}
                   >
                     {SUPPORTED_FORMATS.map((fmt) => (
                       <option key={fmt.id} value={fmt.id}>
@@ -572,8 +665,8 @@ export default function ImageToolsPage() {
                 <button
                   type="button"
                   onClick={handleSwapFormats}
-                  title="Swap source and target formats (e.g. PNG ⇄ WEBP)"
-                  className="mt-5 p-2 rounded-md btn-secondary text-sm flex items-center gap-1.5 hover:bg-[var(--muted)]"
+                  title="Swap format direction (e.g. PNG ➔ WEBP to WEBP ➔ PNG)"
+                  className="mt-5 p-2 rounded-md btn-secondary text-sm flex items-center gap-1.5 hover:bg-[var(--muted)] cursor-pointer"
                 >
                   <span className="text-base font-bold">⇄</span>
                   <span className="text-xs font-medium">Swap</span>
