@@ -57,7 +57,6 @@ export default function BackgroundRemoverPage() {
         const { preload } = await import('@imgly/background-removal');
         if (preload) {
           await preload({
-            publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
             model: 'isnet_quint8',
           });
         }
@@ -169,23 +168,41 @@ export default function BackgroundRemoverPage() {
       setProgressPercent(40);
 
       // Quantized ISNet neural model runs in 1024x1024 space for instant speed and 100% precision
-      const blob = await removeBackground(file, {
-        publicPath: 'https://staticimgly.com/@imgly/background-removal-data/1.7.0/dist/',
-        model: 'isnet_quint8',
-        rescale: true,
-        progress: (key: string, current: number, total: number) => {
-          if (total > 0) {
-            const percent = Math.min(95, Math.round((current / total) * 100));
-            setProgressPercent(percent);
-            if (key.includes('fetch') || key.includes('download')) {
-              setStatusText(`Downloading AI: ${percent}% (Cached after 1st time)`);
-            } else {
-              setStatusText(`Segmenting subject: ${percent}%`);
+      let blob: Blob;
+      try {
+        blob = await removeBackground(file, {
+          model: 'isnet_quint8',
+          rescale: true,
+          device: 'gpu',
+          progress: (key: string, current: number, total: number) => {
+            if (total > 0) {
+              const percent = Math.min(95, Math.round((current / total) * 100));
+              setProgressPercent(percent);
+              if (key.includes('fetch') || key.includes('download')) {
+                setStatusText(`Downloading AI: ${percent}% (Cached after 1st time)`);
+              } else {
+                setStatusText(`Segmenting subject: ${percent}%`);
+              }
             }
-          }
-        },
-        debug: false,
-      });
+          },
+          debug: false,
+        });
+      } catch (gpuErr) {
+        console.warn('GPU segmentation fallback to CPU:', gpuErr);
+        blob = await removeBackground(file, {
+          model: 'isnet_quint8',
+          rescale: true,
+          device: 'cpu',
+          progress: (_key: string, current: number, total: number) => {
+            if (total > 0) {
+              const percent = Math.min(95, Math.round((current / total) * 100));
+              setProgressPercent(percent);
+              setStatusText(`Processing on CPU: ${percent}%`);
+            }
+          },
+          debug: false,
+        });
+      }
 
       const url = URL.createObjectURL(blob);
       setResultUrl(url);
