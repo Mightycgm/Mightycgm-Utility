@@ -16,7 +16,7 @@ interface FormatInfo {
 const SUPPORTED_FORMATS: FormatInfo[] = [
   { id: 'webp', name: 'WEBP', ext: 'webp', mime: 'image/webp', lossy: true, desc: 'Modern web format with superior compression' },
   { id: 'png', name: 'PNG', ext: 'png', mime: 'image/png', lossy: false, desc: 'Lossless quality with full transparency support' },
-  { id: 'jpeg', name: 'JPG / JPEG', ext: 'jpg', mime: 'image/jpeg', lossy: true, desc: 'Universal standard photography format' },
+  { id: 'jpeg', name: 'JPG', ext: 'jpg', mime: 'image/jpeg', lossy: true, desc: 'Universal standard photography format' },
   { id: 'ico', name: 'ICO', ext: 'ico', mime: 'image/x-icon', lossy: false, desc: 'Website favicon & application icon format' },
   { id: 'avif', name: 'AVIF', ext: 'avif', mime: 'image/avif', lossy: true, desc: 'Next-gen compact web format' },
   { id: 'bmp', name: 'BMP', ext: 'bmp', mime: 'image/bmp', lossy: false, desc: 'Standard uncompressed Windows bitmap' },
@@ -24,35 +24,14 @@ const SUPPORTED_FORMATS: FormatInfo[] = [
   { id: 'gif', name: 'GIF', ext: 'gif', mime: 'image/gif', lossy: false, desc: 'Standard graphics interchange format' },
 ];
 
-interface PresetPair {
-  id: string;
-  formatA: string;
-  nameA: string;
-  formatB: string;
-  nameB: string;
-}
-
-const PRESET_PAIRS: PresetPair[] = [
-  { id: 'png-webp', formatA: 'png', nameA: 'PNG', formatB: 'webp', nameB: 'WEBP' },
-  { id: 'jpg-png', formatA: 'jpeg', nameA: 'JPG', formatB: 'png', nameB: 'PNG' },
-  { id: 'jpg-webp', formatA: 'jpeg', nameA: 'JPG', formatB: 'webp', nameB: 'WEBP' },
-  { id: 'png-ico', formatA: 'png', nameA: 'PNG', formatB: 'ico', nameB: 'ICO' },
-  { id: 'jpg-ico', formatA: 'jpeg', nameA: 'JPG', formatB: 'ico', nameB: 'ICO' },
-  { id: 'webp-ico', formatA: 'webp', nameA: 'WEBP', formatB: 'ico', nameB: 'ICO' },
-  { id: 'svg-ico', formatA: 'svg', nameA: 'SVG', formatB: 'ico', nameB: 'ICO' },
-  { id: 'svg-png', formatA: 'svg', nameA: 'SVG', formatB: 'png', nameB: 'PNG' },
-  { id: 'png-bmp', formatA: 'png', nameA: 'PNG', formatB: 'bmp', nameB: 'BMP' },
-  { id: 'png-avif', formatA: 'png', nameA: 'PNG', formatB: 'avif', nameB: 'AVIF' },
-];
-
 const ICO_SIZES = [
-  { label: 'Original Dimensions', value: 0, sub: 'Keep source resolution' },
-  { label: '256 × 256 px', value: 256, sub: 'Windows Jumbo / macOS HD Icon' },
-  { label: '128 × 128 px', value: 128, sub: 'Large Application Icon' },
-  { label: '64 × 64 px', value: 64, sub: 'High-DPI Retina Favicon' },
-  { label: '48 × 48 px', value: 48, sub: 'Windows Taskbar / Desktop' },
-  { label: '32 × 32 px', value: 32, sub: 'Standard Desktop Browser Tab' },
-  { label: '16 × 16 px', value: 16, sub: 'Small Browser Tab / Address Bar' },
+  { label: 'Original Size', value: 0, sub: 'Keep source resolution' },
+  { label: '256 × 256 px', value: 256, sub: 'Windows Jumbo / HD Icon' },
+  { label: '128 × 128 px', value: 128, sub: 'Large App Icon' },
+  { label: '64 × 64 px', value: 64, sub: 'High-DPI Favicon' },
+  { label: '48 × 48 px', value: 48, sub: 'Windows Taskbar' },
+  { label: '32 × 32 px', value: 32, sub: 'Standard Browser Tab' },
+  { label: '16 × 16 px', value: 16, sub: 'Small Browser Tab' },
 ];
 
 interface FileItem {
@@ -146,7 +125,7 @@ function canvasToBmpBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-// Pure JS ICO Encoder (wraps high quality PNG data in standard ICO container)
+// Pure JS ICO Encoder (wraps PNG data in standard ICO container)
 async function canvasToIcoBlob(canvas: HTMLCanvasElement, targetSize: number = 0): Promise<Blob> {
   let finalCanvas = canvas;
   if (targetSize > 0 && (canvas.width !== targetSize || canvas.height !== targetSize)) {
@@ -208,29 +187,13 @@ export default function ImageToolsPage() {
 
   // Converter state
   const [items, setItems] = useState<FileItem[]>([]);
+  const [globalSourceFormat, setGlobalSourceFormat] = useState<string>('any');
   const [globalTargetFormat, setGlobalTargetFormat] = useState<string>('webp');
-  const [activePresetId, setActivePresetId] = useState<string>('png-webp');
   const [quality, setQuality] = useState<number>(0.85);
   const [scale, setScale] = useState<number>(1);
   const [icoSize, setIcoSize] = useState<number>(0);
   const [bgFill, setBgFill] = useState<'transparent' | 'white' | 'black'>('transparent');
   const [isConvertingAll, setIsConvertingAll] = useState(false);
-
-  // Preset swap directions state
-  const [presetDirections, setPresetDirections] = useState<
-    Record<string, { from: string; fromName: string; to: string; toName: string }>
-  >(() => {
-    const initial: Record<string, { from: string; fromName: string; to: string; toName: string }> = {};
-    PRESET_PAIRS.forEach((p) => {
-      initial[p.id] = {
-        from: p.formatA,
-        fromName: p.nameA,
-        to: p.formatB,
-        toName: p.nameB,
-      };
-    });
-    return initial;
-  });
 
   // Compressor state
   const [compFile, setCompFile] = useState<File | null>(null);
@@ -245,31 +208,36 @@ export default function ImageToolsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Add files to list
-  const handleFilesAdded = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
+  const handleFilesAdded = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
 
-    const newItems: FileItem[] = [];
-    Array.from(files).forEach((file) => {
-      const detected = detectFormat(file);
-      let target = globalTargetFormat;
-      if (detected === globalTargetFormat) {
-        target = globalTargetFormat === 'webp' ? 'png' : 'webp';
-      }
+      const newItems: FileItem[] = [];
+      Array.from(files).forEach((file) => {
+        const detected = detectFormat(file);
 
-      const previewUrl = URL.createObjectURL(file);
-      newItems.push({
-        id: Math.random().toString(36).substring(2, 9),
-        file,
-        previewUrl,
-        sourceFormat: detected,
-        targetFormat: target,
-        originalSize: file.size,
-        status: 'idle',
+        // If source format filter is active, only convert matching or auto-detect
+        let target = globalTargetFormat;
+        if (detected === globalTargetFormat) {
+          target = globalTargetFormat === 'webp' ? 'png' : 'webp';
+        }
+
+        const previewUrl = URL.createObjectURL(file);
+        newItems.push({
+          id: Math.random().toString(36).substring(2, 9),
+          file,
+          previewUrl,
+          sourceFormat: detected,
+          targetFormat: target,
+          originalSize: file.size,
+          status: 'idle',
+        });
       });
-    });
 
-    setItems((prev) => [...prev, ...newItems]);
-  }, [globalTargetFormat]);
+      setItems((prev) => [...prev, ...newItems]);
+    },
+    [globalTargetFormat]
+  );
 
   // Compress handler
   const handleCompressUpload = useCallback((file: File) => {
@@ -421,86 +389,45 @@ export default function ImageToolsPage() {
     setItems((prev) => prev.map((i) => (i.id === id ? updated : i)));
   };
 
-  // Handle preset click with in-place swap
-  const handlePresetClick = (preset: PresetPair) => {
-    const currentDir = presetDirections[preset.id] || {
-      from: preset.formatA,
-      fromName: preset.nameA,
-      to: preset.formatB,
-      toName: preset.nameB,
-    };
+  // Swap Source and Target Formats
+  const handleSwapFormats = () => {
+    const prevSource = globalSourceFormat;
+    const prevTarget = globalTargetFormat;
 
-    if (activePresetId === preset.id) {
-      // Swap direction in place
-      const swapped = {
-        from: currentDir.to,
-        fromName: currentDir.toName,
-        to: currentDir.from,
-        toName: currentDir.fromName,
-      };
+    const newSource = prevTarget;
+    const newTarget = prevSource === 'any' ? (prevTarget === 'png' ? 'webp' : 'png') : prevSource;
 
-      setPresetDirections((prev) => ({
-        ...prev,
-        [preset.id]: swapped,
-      }));
+    setGlobalSourceFormat(newSource);
+    setGlobalTargetFormat(newTarget);
 
-      setGlobalTargetFormat(swapped.to);
-      setItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          targetFormat: swapped.to,
-          status: 'idle',
-        }))
-      );
-    } else {
-      // Activate preset
-      setActivePresetId(preset.id);
-      setGlobalTargetFormat(currentDir.to);
-      setItems((prev) =>
-        prev.map((item) => ({
-          ...item,
-          targetFormat: currentDir.to,
-          status: 'idle',
-        }))
-      );
-    }
+    setItems((prev) =>
+      prev.map((item) => ({
+        ...item,
+        targetFormat: newTarget,
+        status: 'idle',
+      }))
+    );
   };
 
-  // Swap global target format
-  const handleSwapFormats = () => {
-    const currentPreset = PRESET_PAIRS.find((p) => p.id === activePresetId);
-    if (currentPreset) {
-      handlePresetClick(currentPreset);
-      return;
+  // Change Source Format Filter
+  const handleSourceFormatChange = (newSrc: string) => {
+    setGlobalSourceFormat(newSrc);
+    if (newSrc !== 'any' && newSrc === globalTargetFormat) {
+      // Auto adjust target format if user picked same
+      const fallbackTarget = newSrc === 'png' ? 'webp' : 'png';
+      setGlobalTargetFormat(fallbackTarget);
+      setItems((prev) => prev.map((item) => ({ ...item, targetFormat: fallbackTarget, status: 'idle' })));
     }
-
-    const nextFmt = globalTargetFormat === 'webp' ? 'png' : 'webp';
-    handleGlobalFormatChange(nextFmt);
   };
 
   // Change Global Target Format
-  const handleGlobalFormatChange = (newFmt: string) => {
-    setGlobalTargetFormat(newFmt);
-    setItems((prev) => prev.map((item) => ({ ...item, targetFormat: newFmt, status: 'idle' })));
+  const handleGlobalFormatChange = (newTgt: string) => {
+    setGlobalTargetFormat(newTgt);
+    setItems((prev) => prev.map((item) => ({ ...item, targetFormat: newTgt, status: 'idle' })));
 
-    const matched = PRESET_PAIRS.find((p) => p.formatA === newFmt || p.formatB === newFmt);
-    if (matched) {
-      setActivePresetId(matched.id);
-      setPresetDirections((prev) => {
-        const current = prev[matched.id];
-        if (current && current.to !== newFmt) {
-          return {
-            ...prev,
-            [matched.id]: {
-              from: current.to,
-              fromName: current.toName,
-              to: current.from,
-              toName: current.fromName,
-            },
-          };
-        }
-        return prev;
-      });
+    if (globalSourceFormat !== 'any' && globalSourceFormat === newTgt) {
+      const fallbackSource = newTgt === 'png' ? 'webp' : 'png';
+      setGlobalSourceFormat(fallbackSource);
     }
   };
 
@@ -592,75 +519,126 @@ export default function ImageToolsPage() {
 
       {/* CONVERT TAB */}
       {tab === 'convert' && (
-        <div className="space-y-8">
-          {/* Direct Target Format Selector (All 8 Formats Including ICO) */}
-          <div className="tool-card p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                Target Output Format
-              </span>
-              <span className="text-xs text-[var(--muted-text)]">Select any target format in 1 click</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {SUPPORTED_FORMATS.map((fmt) => {
-                const isSelected = globalTargetFormat === fmt.id;
-                return (
+        <div className="space-y-6">
+          {/* Ultra-Clean Unified Source ➔ Target Format Bar */}
+          <div className="tool-card p-5 space-y-5 bg-[var(--card)] border border-[var(--card-border)]">
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+              {/* 1. Source Format (From) */}
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--muted-text)] flex items-center gap-1.5">
+                    <span>📤</span> <span>From (Source)</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-[var(--foreground)] bg-[var(--muted)] px-2 py-0.5 rounded border border-[var(--card-border)]">
+                    {globalSourceFormat === 'any' ? 'Any Format' : `.${globalSourceFormat}`}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
                   <button
-                    key={fmt.id}
                     type="button"
-                    onClick={() => handleGlobalFormatChange(fmt.id)}
-                    className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer select-none ${
-                      isSelected
-                        ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm scale-105'
-                        : 'bg-[var(--muted)] border border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
-                    }`}
-                  >
-                    <span>{fmt.name}</span>
-                    <span className="opacity-60 text-[10px]">.{fmt.ext}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Quick Swap Preset Pills */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                Quick Swap Presets
-              </span>
-              <span className="text-xs text-[var(--muted-text)]">Click active button to swap direction (⇄)</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {PRESET_PAIRS.map((preset) => {
-                const dir = presetDirections[preset.id] || {
-                  from: preset.formatA,
-                  fromName: preset.nameA,
-                  to: preset.formatB,
-                  toName: preset.nameB,
-                };
-                const isActive = activePresetId === preset.id && globalTargetFormat === dir.to;
-
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => handlePresetClick(preset)}
-                    className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 cursor-pointer select-none ${
-                      isActive
+                    onClick={() => handleSourceFormatChange('any')}
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer select-none ${
+                      globalSourceFormat === 'any'
                         ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
-                        : 'bg-[var(--card)] border border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
+                        : 'bg-[var(--muted)] border border-[var(--card-border)] text-[var(--muted-text)] hover:text-[var(--foreground)]'
                     }`}
-                    title={`Convert ${dir.fromName} ➔ ${dir.toName}. Click again to swap to ${dir.toName} ➔ ${dir.fromName}.`}
                   >
-                    <span>
-                      {dir.fromName} ➔ {dir.toName}
-                    </span>
-                    <span className="opacity-60 text-[10px]">⇄</span>
+                    Any
                   </button>
-                );
-              })}
+                  {SUPPORTED_FORMATS.map((fmt) => (
+                    <button
+                      key={`src-${fmt.id}`}
+                      type="button"
+                      onClick={() => handleSourceFormatChange(fmt.id)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer select-none ${
+                        globalSourceFormat === fmt.id
+                          ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                          : 'bg-[var(--muted)] border border-[var(--card-border)] text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                      }`}
+                    >
+                      {fmt.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Instant Swap Center Button */}
+              <div className="flex items-center justify-center pt-1 lg:pt-4">
+                <button
+                  type="button"
+                  onClick={handleSwapFormats}
+                  className="btn-secondary p-2.5 rounded-full flex items-center justify-center hover:scale-110 active:scale-95 transition-all shadow-md group border-[var(--card-border)] cursor-pointer"
+                  title="Swap Source and Target Formats (⇄)"
+                >
+                  <span className="text-lg font-bold group-hover:rotate-180 transition-transform duration-300">⇄</span>
+                </button>
+              </div>
+
+              {/* 3. Target Format (To) */}
+              <div className="flex-1 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--muted-text)] flex items-center gap-1.5">
+                    <span>📥</span> <span>To (Target)</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-[var(--foreground)] bg-[var(--muted)] px-2 py-0.5 rounded border border-[var(--card-border)]">
+                    .{globalTargetFormat}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {SUPPORTED_FORMATS.map((fmt) => (
+                    <button
+                      key={`tgt-${fmt.id}`}
+                      type="button"
+                      onClick={() => handleGlobalFormatChange(fmt.id)}
+                      className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer select-none ${
+                        globalTargetFormat === fmt.id
+                          ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                          : 'bg-[var(--muted)] border border-[var(--card-border)] text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                      }`}
+                    >
+                      {fmt.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+
+            {/* Dedicated ICO Size Presets Panel */}
+            {globalTargetFormat === 'ico' && (
+              <div className="pt-4 border-t border-[var(--card-border)] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span>🎯</span>
+                    <span className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">
+                      ICO Favicon & Application Size Presets
+                    </span>
+                  </div>
+                  <span className="text-xs text-[var(--muted-text)] font-mono">
+                    Selected: {icoSize === 0 ? 'Original Size' : `${icoSize} × ${icoSize} px`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                  {ICO_SIZES.map((size) => {
+                    const isSelected = icoSize === size.value;
+                    return (
+                      <button
+                        key={size.value}
+                        type="button"
+                        onClick={() => setIcoSize(size.value)}
+                        className={`p-2.5 rounded-lg text-left transition-all border cursor-pointer select-none flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
+                            : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
+                        }`}
+                      >
+                        <span className="text-xs font-bold">{size.label}</span>
+                        <span className="text-[10px] opacity-75 mt-1 leading-tight">{size.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Upload Drop Zone */}
@@ -694,77 +672,19 @@ export default function ImageToolsPage() {
             />
           </div>
 
-          {/* Dedicated ICO Size Presets Panel */}
-          {globalTargetFormat === 'ico' && (
-            <div className="tool-card p-5 space-y-3 bg-[var(--card)] border border-indigo-500/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">🎯</span>
-                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--foreground)]">
-                    ICO Favicon & Application Size Presets
-                  </span>
-                </div>
-                <span className="text-xs text-[var(--muted-text)] font-mono">
-                  Current: {icoSize === 0 ? 'Original Size' : `${icoSize} × ${icoSize} px`}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2 pt-1">
-                {ICO_SIZES.map((size) => {
-                  const isSelected = icoSize === size.value;
-                  return (
-                    <button
-                      key={size.value}
-                      type="button"
-                      onClick={() => setIcoSize(size.value)}
-                      className={`p-2.5 rounded-lg text-left transition-all border cursor-pointer select-none flex flex-col justify-between ${
-                        isSelected
-                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
-                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)] hover:border-[var(--muted-text)]'
-                      }`}
-                    >
-                      <span className="text-xs font-bold">{size.label}</span>
-                      <span className="text-[10px] opacity-75 mt-1 leading-tight">{size.sub}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
           {/* Conversion Options Toolbar */}
-          <div className="tool-card p-5 space-y-5">
+          <div className="tool-card p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-4">
-              {/* Target Format Selector & Swap Button */}
-              <div className="flex items-center gap-3">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium text-[var(--muted-text)] block">Convert All To</label>
-                  <select
-                    className="input-field py-1.5 text-sm font-medium w-auto cursor-pointer"
-                    value={globalTargetFormat}
-                    onChange={(e) => handleGlobalFormatChange(e.target.value)}
-                  >
-                    {SUPPORTED_FORMATS.map((fmt) => (
-                      <option key={fmt.id} value={fmt.id}>
-                        {fmt.name} (.{fmt.ext})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Instant Swap Button */}
-                <button
-                  type="button"
-                  onClick={handleSwapFormats}
-                  title="Swap format direction (e.g. PNG ➔ WEBP to WEBP ➔ PNG)"
-                  className="mt-5 p-2 rounded-md btn-secondary text-sm flex items-center gap-1.5 hover:bg-[var(--muted)] cursor-pointer"
-                >
-                  <span className="text-base font-bold">⇄</span>
-                  <span className="text-xs font-medium">Swap</span>
-                </button>
+              {/* Current Format Status */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--muted-text)]">Active Mode:</span>
+                <span className="px-2.5 py-1 rounded bg-[var(--muted)] border border-[var(--card-border)] text-xs font-mono font-bold text-[var(--foreground)]">
+                  {globalSourceFormat === 'any' ? 'Any' : globalSourceFormat.toUpperCase()} ➔ {globalTargetFormat.toUpperCase()}
+                </span>
               </div>
 
               {/* Action Buttons */}
-              <div className="flex items-center gap-2.5 mt-auto">
+              <div className="flex items-center gap-2.5">
                 {items.length > 0 && (
                   <button
                     onClick={clearAll}
