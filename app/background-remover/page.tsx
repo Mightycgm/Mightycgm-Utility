@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import ToolPageWrapper from '@/components/layout/ToolPageWrapper';
 
 type ViewMode = 'slider' | 'cutout' | 'original';
+type EditorTool = 'erase' | 'restore' | 'magic_erase' | 'magic_restore';
 
 interface HistoryState {
   imageData: ImageData;
@@ -82,6 +83,88 @@ function floodFillErase(
   ctx.putImageData(imgData, 0, 0);
 }
 
+// Fast Queue-based Flood Fill for Magic Restorer (restores from original image)
+function floodFillRestore(
+  canvas: HTMLCanvasElement,
+  sourceImg: HTMLImageElement,
+  startX: number,
+  startY: number,
+  tolerancePercent: number
+) {
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return;
+
+  const width = canvas.width;
+  const height = canvas.height;
+  const imgData = ctx.getImageData(0, 0, width, height);
+  const data = imgData.data;
+
+  // Offscreen canvas to sample original source image
+  const offCanvas = document.createElement('canvas');
+  offCanvas.width = width;
+  offCanvas.height = height;
+  const offCtx = offCanvas.getContext('2d', { willReadFrequently: true })!;
+  offCtx.drawImage(sourceImg, 0, 0, width, height);
+  const origData = offCtx.getImageData(0, 0, width, height).data;
+
+  const startIndex = (startY * width + startX) * 4;
+  const targetR = origData[startIndex];
+  const targetG = origData[startIndex + 1];
+  const targetB = origData[startIndex + 2];
+
+  const maxDist = 441.67;
+  const tolDist = (tolerancePercent / 100) * maxDist;
+
+  const visited = new Uint8Array(width * height);
+  const queue: number[] = [startX + startY * width];
+  visited[startX + startY * width] = 1;
+
+  while (queue.length > 0) {
+    const idx = queue.pop()!;
+    const px = idx % width;
+    const py = Math.floor(idx / width);
+    const dataIdx = idx * 4;
+
+    const r = origData[dataIdx];
+    const g = origData[dataIdx + 1];
+    const b = origData[dataIdx + 2];
+    const a = origData[dataIdx + 3];
+
+    const dr = r - targetR;
+    const dg = g - targetG;
+    const db = b - targetB;
+    const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+
+    if (dist <= tolDist) {
+      // Restore pixel from original
+      data[dataIdx] = r;
+      data[dataIdx + 1] = g;
+      data[dataIdx + 2] = b;
+      data[dataIdx + 3] = a > 0 ? a : 255;
+
+      // Check 4-connected neighbours
+      if (px > 0 && !visited[idx - 1]) {
+        visited[idx - 1] = 1;
+        queue.push(idx - 1);
+      }
+      if (px < width - 1 && !visited[idx + 1]) {
+        visited[idx + 1] = 1;
+        queue.push(idx + 1);
+      }
+      if (py > 0 && !visited[idx - width]) {
+        visited[idx - width] = 1;
+        queue.push(idx - width);
+      }
+      if (py < height - 1 && !visited[idx + width]) {
+        visited[idx + width] = 1;
+        queue.push(idx + width);
+      }
+    }
+  }
+
+  ctx.putImageData(imgData, 0, 0);
+}
+
 export default function BackgroundRemoverPage() {
   const [originalUrl, setOriginalUrl] = useState<string>('');
   const [resultUrl, setResultUrl] = useState<string>('');
@@ -107,12 +190,14 @@ export default function BackgroundRemoverPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('slider');
   const [sliderPosition, setSliderPosition] = useState<number>(50);
 
-  // Erase / Restore / Magic Eraser Editor
+  // Erase / Restore / Magic Editor
   const [showEditor, setShowEditor] = useState(false);
-  const [activeTool, setActiveTool] = useState<'erase' | 'restore' | 'magic'>('erase');
-  const [brushSize, setBrushSize] = useState<number>(30);
+  const [activeTool, setActiveTool] = useState<EditorTool>('erase');
+  const [brushSize, setBrushSize] = useState<number>(35);
   const [brushSoftness, setBrushSoftness] = useState<number>(20);
-  const [magicTolerance, setMagicTolerance] = useState<number>(20);
+  const [magicTolerance, setMagicTolerance] = useState<number>(25);
+  const [showGhostOverlay, setShowGhostOverlay] = useState<boolean>(true);
+  const [ghostOpacity, setGhostOpacity] = useState<number>(35);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [clientCursor, setClientCursor] = useState<{ x: number; y: number } | null>(null);
 
@@ -122,11 +207,12 @@ export default function BackgroundRemoverPage() {
   const undoStackRef = useRef<HistoryState[]>([]);
   const redoStackRef = useRef<HistoryState[]>([]);
 
-  // Canvas Refs
+  // Canvas Refs & Lag-Free Stroke Tracking
   const sourceImageRef = useRef<HTMLImageElement | null>(null);
   const resultImageRef = useRef<HTMLImageElement | null>(null);
   const editorCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const isPaintingRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const sliderContainerRef = useRef<HTMLDivElement | null>(null);
 
@@ -218,7 +304,6 @@ export default function BackgroundRemoverPage() {
   }, []);
 
   // Global Keyboard Shortcuts (Ctrl+Z for Undo, Ctrl+Y / Ctrl+Shift+Z for Redo)
-  // Uses physical key code (e.code / e.keyCode) to work across ALL keyboard layouts (Thai, EN, etc.)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -423,8 +508,78 @@ export default function BackgroundRemoverPage() {
     }, 50);
   };
 
-  // Erase / Restore / Magic Wand Canvas Drawing Handler
-  const handleCanvasAction = (clientX: number, clientY: number) => {
+  // High-Performance 120 FPS Direct Canvas Stroke Rendering (No toDataURL in mousemove!)
+  const paintDirect = (clientX: number, clientY: number) => {
+    const canvas = editorCanvasRef.current;
+    if (!canvas || !isPaintingRef.current) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
+    const currentX = (clientX - rect.left) * scaleX;
+    const currentY = (clientY - rect.top) * scaleY;
+
+    const ctx = canvas.getContext('2d')!;
+    const actualRadius = (brushSize / 2) * scaleX;
+
+    const last = lastPointRef.current || { x: currentX, y: currentY };
+
+    ctx.save();
+
+    if (activeTool === 'erase') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = actualRadius * 2;
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(currentX, currentY);
+      ctx.stroke();
+
+      // Ensure start circle is filled
+      ctx.beginPath();
+      ctx.arc(currentX, currentY, actualRadius, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (activeTool === 'restore' && sourceImageRef.current) {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = actualRadius * 2;
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(currentX, currentY);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(currentX, currentY, actualRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.clip();
+      ctx.drawImage(sourceImageRef.current, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+
+    ctx.restore();
+    lastPointRef.current = { x: currentX, y: currentY };
+  };
+
+  // Finish Stroke & Commit History (Only called once on mouseup/pointerup!)
+  const commitCanvasStroke = () => {
+    const canvas = editorCanvasRef.current;
+    if (!canvas || !isPaintingRef.current) return;
+
+    isPaintingRef.current = false;
+    lastPointRef.current = null;
+    pushHistory(canvas);
+
+    // Update result blob asynchronously
+    const dataUrl = canvas.toDataURL('image/png');
+    setResultUrl(dataUrl);
+    canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
+  };
+
+  // 1-Click Magic Tools Execution (Magic Erase & Magic Restore)
+  const handleMagicClick = (clientX: number, clientY: number) => {
     const canvas = editorCanvasRef.current;
     if (!canvas) return;
 
@@ -435,52 +590,16 @@ export default function BackgroundRemoverPage() {
     const x = (clientX - rect.left) * scaleX;
     const y = (clientY - rect.top) * scaleY;
 
-    if (activeTool === 'magic') {
-      // Magic Eraser: Instant Connected Color Region Flood-Fill
-      const targetX = Math.floor(Math.max(0, Math.min(canvas.width - 1, x)));
-      const targetY = Math.floor(Math.max(0, Math.min(canvas.height - 1, y)));
+    const targetX = Math.floor(Math.max(0, Math.min(canvas.width - 1, x)));
+    const targetY = Math.floor(Math.max(0, Math.min(canvas.height - 1, y)));
+
+    if (activeTool === 'magic_erase') {
       floodFillErase(canvas, targetX, targetY, magicTolerance);
-      pushHistory(canvas);
-      const dataUrl = canvas.toDataURL('image/png');
-      setResultUrl(dataUrl);
-      canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
-      return;
+    } else if (activeTool === 'magic_restore' && sourceImageRef.current) {
+      floodFillRestore(canvas, sourceImageRef.current, targetX, targetY, magicTolerance);
     }
 
-    if (!isPaintingRef.current) return;
-
-    const ctx = canvas.getContext('2d')!;
-    const actualRadius = (brushSize / 2) * scaleX;
-
-    ctx.save();
-
-    if (activeTool === 'erase') {
-      ctx.globalCompositeOperation = 'destination-out';
-      if (brushSoftness > 0) {
-        const grad = ctx.createRadialGradient(x, y, actualRadius * (1 - brushSoftness / 100), x, y, actualRadius);
-        grad.addColorStop(0, 'rgba(0,0,0,1)');
-        grad.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
-        ctx.fill();
-      } else {
-        ctx.beginPath();
-        ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    } else if (activeTool === 'restore' && sourceImageRef.current) {
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, actualRadius, 0, Math.PI * 2);
-      ctx.clip();
-      ctx.drawImage(sourceImageRef.current, 0, 0, canvas.width, canvas.height);
-      ctx.restore();
-    }
-
-    ctx.restore();
-
+    pushHistory(canvas);
     const dataUrl = canvas.toDataURL('image/png');
     setResultUrl(dataUrl);
     canvas.toBlob((b) => b && setResultBlob(b), 'image/png');
@@ -539,6 +658,34 @@ export default function BackgroundRemoverPage() {
     window.addEventListener('paste', handlePaste);
     return () => window.removeEventListener('paste', handlePaste);
   }, [processImage]);
+
+  // Smooth Before / After Split Slider Pointer Drag
+  const handleSliderPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const container = sliderContainerRef.current;
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+
+    const updatePosition = (clientX: number) => {
+      const x = clientX - rect.left;
+      const pct = Math.max(0, Math.min(100, (x / rect.width) * 100));
+      setSliderPosition(pct);
+    };
+
+    updatePosition(e.clientX);
+
+    const onPointerMove = (moveEvt: PointerEvent) => {
+      updatePosition(moveEvt.clientX);
+    };
+
+    const onPointerUp = () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+    };
+
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+  };
 
   return (
     <ToolPageWrapper
@@ -718,7 +865,7 @@ export default function BackgroundRemoverPage() {
                     showEditor ? 'border-[var(--foreground)] font-semibold' : ''
                   }`}
                 >
-                  <span>🧹 Erase / Restore</span>
+                  <span>🧹 Erase / Restore Editor</span>
                 </button>
 
                 <button
@@ -739,19 +886,19 @@ export default function BackgroundRemoverPage() {
               </div>
             </div>
 
-            {/* withoutBG Erase / Restore / Magic Eraser Editor Panel */}
+            {/* withoutBG Erase / Restore / Magic Restorer Editor Panel */}
             {showEditor && (
               <div className="tool-card p-4 space-y-4 bg-[var(--card)] border border-[var(--card-border)]">
                 <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--card-border)] pb-3 text-xs">
-                  {/* Tool selection */}
-                  <div className="flex items-center gap-1.5">
+                  {/* Tool Selection (4 Tools) */}
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <span className="font-semibold text-[var(--foreground)] mr-1">Tool:</span>
                     <button
                       type="button"
                       onClick={() => setActiveTool('erase')}
-                      className={`px-3 py-1.5 rounded font-medium border ${
+                      className={`px-3 py-1.5 rounded font-medium border cursor-pointer select-none ${
                         activeTool === 'erase'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
                           : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                     >
@@ -760,30 +907,45 @@ export default function BackgroundRemoverPage() {
                     <button
                       type="button"
                       onClick={() => setActiveTool('restore')}
-                      className={`px-3 py-1.5 rounded font-medium border ${
+                      className={`px-3 py-1.5 rounded font-medium border cursor-pointer select-none ${
                         activeTool === 'restore'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
                           : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                     >
-                      🖌️ Restore
+                      🖌️ Restore Brush
                     </button>
                     <button
                       type="button"
-                      onClick={() => setActiveTool('magic')}
-                      className={`px-3 py-1.5 rounded font-medium border ${
-                        activeTool === 'magic'
-                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)]'
+                      onClick={() => setActiveTool('magic_erase')}
+                      className={`px-3 py-1.5 rounded font-medium border cursor-pointer select-none ${
+                        activeTool === 'magic_erase'
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
                           : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
                       }`}
                       title="Click on any connected background color region to erase it in 1 click"
                     >
-                      🪄 Magic Eraser
+                      🪄 Magic Erase
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTool('magic_restore');
+                        setShowGhostOverlay(true);
+                      }}
+                      className={`px-3 py-1.5 rounded font-medium border cursor-pointer select-none ${
+                        activeTool === 'magic_restore'
+                          ? 'bg-[var(--foreground)] text-[var(--background)] border-[var(--foreground)] shadow-sm'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--foreground)]'
+                      }`}
+                      title="Click on any removed part (hair, arm, clothing) to restore it in 1 click"
+                    >
+                      ✨ Magic Restore
                     </button>
                   </div>
 
                   {/* Magic Tolerance or Brush Sliders */}
-                  {activeTool === 'magic' ? (
+                  {activeTool === 'magic_erase' || activeTool === 'magic_restore' ? (
                     <div className="flex items-center gap-2.5 flex-1 max-w-xs">
                       <span className="text-[var(--muted-text)] whitespace-nowrap">Tolerance: {magicTolerance}%</span>
                       <input
@@ -803,7 +965,7 @@ export default function BackgroundRemoverPage() {
                         <input
                           type="range"
                           min={6}
-                          max={100}
+                          max={120}
                           value={brushSize}
                           onChange={(e) => setBrushSize(+e.target.value)}
                           className="app-slider"
@@ -825,8 +987,34 @@ export default function BackgroundRemoverPage() {
                     </>
                   )}
 
-                  {/* Undo / Redo / Zoom */}
+                  {/* Ghost Overlay & Undo / Redo */}
                   <div className="flex items-center gap-2">
+                    {/* Ghost Preview Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => setShowGhostOverlay(!showGhostOverlay)}
+                      className={`px-2.5 py-1 rounded text-xs border font-medium cursor-pointer transition-all ${
+                        showGhostOverlay
+                          ? 'bg-indigo-600/30 border-indigo-500 text-indigo-200'
+                          : 'bg-[var(--muted)] border-[var(--card-border)] text-[var(--muted-text)]'
+                      }`}
+                      title="Show translucent ghost of original image to see removed parts clearly"
+                    >
+                      👁️ Ghost Guide: {showGhostOverlay ? `${ghostOpacity}%` : 'Off'}
+                    </button>
+
+                    {showGhostOverlay && (
+                      <input
+                        type="range"
+                        min={10}
+                        max={80}
+                        value={ghostOpacity}
+                        onChange={(e) => setGhostOpacity(+e.target.value)}
+                        className="w-16 accent-indigo-500"
+                        title="Ghost Guide Opacity"
+                      />
+                    )}
+
                     <button
                       type="button"
                       onClick={handleUndo}
@@ -871,57 +1059,95 @@ export default function BackgroundRemoverPage() {
                   </div>
                 </div>
 
+                {/* Subtitle helper tip */}
+                <div className="text-[11px] text-[var(--muted-text)] flex items-center gap-2">
+                  {activeTool === 'magic_restore' && (
+                    <span className="text-indigo-400 font-medium">
+                      💡 Magic Restore Tip: The faint translucent ghost shows removed parts. Click on any lost area to restore it instantly!
+                    </span>
+                  )}
+                  {activeTool === 'magic_erase' && (
+                    <span>💡 Magic Erase Tip: Click on any leftover background patch to erase it completely.</span>
+                  )}
+                  {activeTool === 'restore' && (
+                    <span>💡 Restore Brush Tip: Brush over ghost areas to paint back original details.</span>
+                  )}
+                  {activeTool === 'erase' && (
+                    <span>💡 Erase Brush Tip: Brush over any unwanted pixels to erase them.</span>
+                  )}
+                </div>
+
                 {/* Interactive Editor Canvas Workspace */}
                 <div
-                  className="w-full rounded-lg overflow-auto border border-[var(--card-border)] flex items-center justify-center min-h-[460px] p-4 relative select-none"
+                  className="w-full rounded-lg overflow-auto border border-[var(--card-border)] flex items-center justify-center min-h-[480px] p-4 relative select-none"
                   style={{
                     background:
                       'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
                   }}
                   onMouseLeave={() => {
-                    isPaintingRef.current = false;
+                    commitCanvasStroke();
                     setClientCursor(null);
                   }}
                 >
-                  <canvas
-                    ref={editorCanvasRef}
-                    onClick={(e) => {
-                      if (activeTool === 'magic') {
-                        handleCanvasAction(e.clientX, e.clientY);
-                      }
-                    }}
-                    onMouseDown={(e) => {
-                      if (activeTool !== 'magic') {
-                        isPaintingRef.current = true;
-                        handleCanvasAction(e.clientX, e.clientY);
-                      }
-                    }}
-                    onMouseUp={() => {
-                      if (isPaintingRef.current && editorCanvasRef.current) {
-                        pushHistory(editorCanvasRef.current);
-                      }
-                      isPaintingRef.current = false;
-                    }}
-                    onMouseMove={(e) => {
-                      setClientCursor({ x: e.clientX, y: e.clientY });
-                      if (isPaintingRef.current && activeTool !== 'magic') {
-                        handleCanvasAction(e.clientX, e.clientY);
-                      }
-                    }}
+                  <div
+                    className="relative max-h-[500px] w-auto inline-block"
                     style={{
                       transform: `scale(${zoomLevel})`,
                       transformOrigin: 'center center',
                     }}
-                    className={`max-h-[480px] object-contain w-auto mx-auto rounded transition-transform ${
-                      activeTool === 'magic' ? 'cursor-crosshair' : 'cursor-none'
-                    }`}
-                  />
+                  >
+                    {/* Ghost Guide of Original Image (Shown behind cutout so user clearly sees what is missing!) */}
+                    {showGhostOverlay && originalUrl && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={originalUrl}
+                        alt="Ghost Guide"
+                        style={{ opacity: ghostOpacity / 100 }}
+                        className="absolute inset-0 w-full h-full object-contain pointer-events-none rounded select-none filter contrast-125"
+                      />
+                    )}
+
+                    <canvas
+                      ref={editorCanvasRef}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        if (activeTool === 'magic_erase' || activeTool === 'magic_restore') {
+                          handleMagicClick(e.clientX, e.clientY);
+                        } else {
+                          isPaintingRef.current = true;
+                          const canvas = editorCanvasRef.current;
+                          if (canvas) {
+                            const rect = canvas.getBoundingClientRect();
+                            const scaleX = canvas.width / rect.width;
+                            const scaleY = canvas.height / rect.height;
+                            lastPointRef.current = {
+                              x: (e.clientX - rect.left) * scaleX,
+                              y: (e.clientY - rect.top) * scaleY,
+                            };
+                          }
+                          paintDirect(e.clientX, e.clientY);
+                        }
+                      }}
+                      onPointerMove={(e) => {
+                        setClientCursor({ x: e.clientX, y: e.clientY });
+                        if (isPaintingRef.current) {
+                          paintDirect(e.clientX, e.clientY);
+                        }
+                      }}
+                      onPointerUp={commitCanvasStroke}
+                      className={`relative z-10 max-h-[500px] object-contain w-auto mx-auto rounded transition-transform ${
+                        activeTool === 'magic_erase' || activeTool === 'magic_restore'
+                          ? 'cursor-crosshair'
+                          : 'cursor-none'
+                      }`}
+                    />
+                  </div>
                 </div>
               </div>
             )}
 
             {/* Custom Fixed Viewport Brush Circle Indicator */}
-            {showEditor && clientCursor && activeTool !== 'magic' && (
+            {showEditor && clientCursor && activeTool !== 'magic_erase' && activeTool !== 'magic_restore' && (
               <div
                 className="pointer-events-none fixed rounded-full border-2 border-white shadow-md z-50 transition-none"
                 style={{
@@ -938,89 +1164,88 @@ export default function BackgroundRemoverPage() {
 
             {/* Standard Preview / Slider Display */}
             {!showEditor && (
-              <div className="tool-card p-6">
+              <div className="tool-card p-6 space-y-4">
                 {/* 1. Before/After Split Comparison Slider */}
                 {viewMode === 'slider' && (
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-center text-xs font-semibold uppercase tracking-wider text-[var(--muted-text)]">
-                      <span>Original</span>
-                      <span className="text-[var(--foreground)]">Drag center bar ↔️ to compare</span>
-                      <span className="text-green-500">Removed Background</span>
+                  <div className="space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 font-semibold uppercase tracking-wider text-[var(--muted-text)]">
+                        <span>Original (Left)</span>
+                        <span className="text-[var(--foreground)]">• Drag Bar ◀▶ to Compare •</span>
+                        <span className="text-green-500">Cutout (Right)</span>
+                      </div>
+
+                      {/* Quick Percentage Presets */}
+                      <div className="flex items-center gap-1.5 bg-[var(--muted)] p-1 rounded-md border border-[var(--card-border)]">
+                        {[
+                          { label: 'Original', val: 100 },
+                          { label: '75%', val: 75 },
+                          { label: '50% (Split)', val: 50 },
+                          { label: '25%', val: 25 },
+                          { label: 'Cutout', val: 0 },
+                        ].map((btn) => (
+                          <button
+                            key={btn.label}
+                            type="button"
+                            onClick={() => setSliderPosition(btn.val)}
+                            className={`px-2.5 py-1 rounded text-[11px] font-medium transition-all cursor-pointer ${
+                              sliderPosition === btn.val
+                                ? 'bg-[var(--foreground)] text-[var(--background)] shadow-sm'
+                                : 'text-[var(--muted-text)] hover:text-[var(--foreground)]'
+                            }`}
+                          >
+                            {btn.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
+                    {/* Smooth Aspect-Ratio Matched Comparison Container */}
                     <div
-                      ref={sliderContainerRef}
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        const container = sliderContainerRef.current;
-                        if (!container) return;
-                        const rect = container.getBoundingClientRect();
-                        const updatePos = (clientX: number) => {
-                          const x = clientX - rect.left;
-                          const percentage = Math.max(0, Math.min(100, (x / rect.width) * 100));
-                          setSliderPosition(percentage);
-                        };
-                        updatePos(e.clientX);
-
-                        const onMove = (moveEvt: PointerEvent) => {
-                          updatePos(moveEvt.clientX);
-                        };
-                        const onUp = () => {
-                          window.removeEventListener('pointermove', onMove);
-                          window.removeEventListener('pointerup', onUp);
-                        };
-                        window.addEventListener('pointermove', onMove);
-                        window.addEventListener('pointerup', onUp);
-                      }}
-                      className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none h-[480px] flex items-center justify-center cursor-ew-resize touch-none"
+                      className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none min-h-[480px] flex items-center justify-center p-4"
                       style={{
                         background:
                           'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
                       }}
                     >
-                      {/* Original (Underneath / Left clipped) */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={originalUrl}
-                        alt="Original"
-                        className="absolute inset-0 w-full h-full object-contain pointer-events-none"
-                      />
-
-                      {/* Cutout (Right side overlaid with clip-path) */}
                       <div
-                        className="absolute inset-0 w-full h-full pointer-events-none overflow-hidden"
-                        style={{
-                          clipPath: `polygon(${sliderPosition}% 0, 100% 0, 100% 100%, ${sliderPosition}% 100%)`,
-                        }}
+                        ref={sliderContainerRef}
+                        onPointerDown={handleSliderPointerDown}
+                        className="relative max-h-[500px] w-auto inline-block cursor-ew-resize touch-none shadow-2xl rounded-lg overflow-hidden"
                       >
+                        {/* Original Image (Full Background) */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={resultUrl}
-                          alt="Cutout"
-                          className="w-full h-full object-contain"
+                          src={originalUrl}
+                          alt="Original"
+                          className="max-h-[500px] w-auto object-contain block pointer-events-none rounded select-none"
                         />
-                      </div>
 
-                      {/* Draggable Vertical Divider Handle */}
-                      <div
-                        className="absolute top-0 bottom-0 w-0.5 bg-white shadow-2xl pointer-events-none z-10"
-                        style={{ left: `${sliderPosition}%` }}
-                      >
-                        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white text-black rounded-full shadow-lg flex items-center justify-center text-[10px] font-bold">
-                          ◀▶
+                        {/* Cutout Foreground (Revealed on the Right side) */}
+                        <div
+                          className="absolute inset-0 pointer-events-none overflow-hidden"
+                          style={{
+                            clipPath: `polygon(${sliderPosition}% 0, 100% 0, 100% 100%, ${sliderPosition}% 100%)`,
+                          }}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={resultUrl}
+                            alt="Cutout"
+                            className="max-h-[500px] w-auto object-contain block rounded select-none"
+                          />
+                        </div>
+
+                        {/* Draggable Vertical Divider Handle */}
+                        <div
+                          className="absolute top-0 bottom-0 w-0.5 bg-white shadow-2xl pointer-events-none z-10"
+                          style={{ left: `${sliderPosition}%` }}
+                        >
+                          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white text-black rounded-full shadow-2xl flex items-center justify-center text-[10px] font-bold border border-gray-300">
+                            ◀▶
+                          </div>
                         </div>
                       </div>
-
-                      {/* Accessible Range Input Overlay */}
-                      <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={sliderPosition}
-                        onChange={(e) => setSliderPosition(+e.target.value)}
-                        aria-label="Before and After comparison slider"
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-ew-resize z-20"
-                      />
                     </div>
                   </div>
                 )}
