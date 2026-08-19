@@ -195,7 +195,7 @@ export default function BackgroundRemoverPage() {
   const [activeTool, setActiveTool] = useState<EditorTool>('erase');
   const [brushSize, setBrushSize] = useState<number>(35);
   const [brushSoftness, setBrushSoftness] = useState<number>(20);
-  const [magicTolerance, setMagicTolerance] = useState<number>(25);
+  const [magicTolerance, setMagicTolerance] = useState<number>(10);
   const [showGhostOverlay, setShowGhostOverlay] = useState<boolean>(true);
   const [ghostOpacity, setGhostOpacity] = useState<number>(35);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -1205,38 +1205,42 @@ export default function BackgroundRemoverPage() {
                       className="relative w-full rounded-xl overflow-hidden border border-[var(--card-border)] select-none min-h-[480px] flex items-center justify-center p-4"
                       style={{
                         background:
-                          'repeating-conic-gradient(var(--card-border) 0% 25%, transparent 0% 50%) 50% / 20px 20px',
+                          'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%) 0 0 / 20px 20px',
                       }}
                     >
                       <div
                         ref={sliderContainerRef}
                         onPointerDown={handleSliderPointerDown}
                         className="relative max-h-[500px] w-auto inline-block cursor-ew-resize touch-none shadow-2xl rounded-lg overflow-hidden"
+                        style={{
+                          background:
+                            'repeating-conic-gradient(#374151 0% 25%, #1f2937 0% 50%) 0 0 / 20px 20px',
+                        }}
                       >
-                        {/* Original Image (Full Background) */}
+                        {/* 1. Base Layer: Transparent Cutout Image (Revealed on Right side over checkered background) */}
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={originalUrl}
-                          alt="Original"
+                          src={resultUrl}
+                          alt="Cutout (Right)"
                           className="max-h-[500px] w-auto object-contain block pointer-events-none rounded select-none"
                         />
 
-                        {/* Cutout Foreground (Revealed on the Right side) */}
+                        {/* 2. Top Layer: Original Image (Clipped to Left side) */}
                         <div
                           className="absolute inset-0 pointer-events-none overflow-hidden"
                           style={{
-                            clipPath: `polygon(${sliderPosition}% 0, 100% 0, 100% 100%, ${sliderPosition}% 100%)`,
+                            clipPath: `polygon(0 0, ${sliderPosition}% 0, ${sliderPosition}% 100%, 0 100%)`,
                           }}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={resultUrl}
-                            alt="Cutout"
+                            src={originalUrl}
+                            alt="Original (Left)"
                             className="max-h-[500px] w-auto object-contain block rounded select-none"
                           />
                         </div>
 
-                        {/* Draggable Vertical Divider Handle */}
+                        {/* 3. Draggable Vertical Divider Handle */}
                         <div
                           className="absolute top-0 bottom-0 w-0.5 bg-white shadow-2xl pointer-events-none z-10"
                           style={{ left: `${sliderPosition}%` }}
