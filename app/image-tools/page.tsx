@@ -26,7 +26,8 @@ const SUPPORTED_FORMATS: FormatInfo[] = [
 
 const ICO_SIZES = [
   { label: 'Original Size', value: 0, sub: 'Keep source resolution' },
-  { label: '256 × 256 px', value: 256, sub: 'Windows Jumbo / HD Icon' },
+  { label: '512 × 512 px', value: 512, sub: 'Ultra-HD / App Store' },
+  { label: '256 × 256 px', value: 256, sub: 'Windows Jumbo / HD' },
   { label: '128 × 128 px', value: 128, sub: 'Large App Icon' },
   { label: '64 × 64 px', value: 64, sub: 'High-DPI Favicon' },
   { label: '48 × 48 px', value: 48, sub: 'Windows Taskbar' },
@@ -617,7 +618,7 @@ export default function ImageToolsPage() {
                     Selected: {icoSize === 0 ? 'Original Size' : `${icoSize} × ${icoSize} px`}
                   </span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                   {ICO_SIZES.map((size) => {
                     const isSelected = icoSize === size.value;
                     return (
