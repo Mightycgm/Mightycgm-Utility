@@ -165,6 +165,95 @@ function floodFillRestore(
   ctx.putImageData(imgData, 0, 0);
 }
 
+// Smart 5% Background Refiner: Protects non-background subject pixels from AI over-cutting & cleans solid background
+function refineCutoutAlpha(
+  cutoutCanvas: HTMLCanvasElement,
+  sourceImg: HTMLImageElement,
+  tolerancePercent: number = 5
+): Promise<{ blob: Blob; dataUrl: string }> {
+  return new Promise((resolve) => {
+    const width = cutoutCanvas.width;
+    const height = cutoutCanvas.height;
+
+    const ctx = cutoutCanvas.getContext('2d', { willReadFrequently: true })!;
+    const cutoutImgData = ctx.getImageData(0, 0, width, height);
+    const cutoutData = cutoutImgData.data;
+
+    // Get original image data
+    const origCanvas = document.createElement('canvas');
+    origCanvas.width = width;
+    origCanvas.height = height;
+    const origCtx = origCanvas.getContext('2d', { willReadFrequently: true })!;
+    origCtx.drawImage(sourceImg, 0, 0, width, height);
+    const origData = origCtx.getImageData(0, 0, width, height).data;
+
+    // Sample boundary corners & edge pixels to determine background colors
+    const samplePoints = [
+      0, // Top-Left
+      (width - 1) * 4, // Top-Right
+      ((height - 1) * width) * 4, // Bottom-Left
+      ((height - 1) * width + width - 1) * 4, // Bottom-Right
+      Math.floor(width / 2) * 4, // Top-Center
+      ((height - 1) * width + Math.floor(width / 2)) * 4, // Bottom-Center
+      (Math.floor(height / 2) * width) * 4, // Left-Center
+      (Math.floor(height / 2) * width + width - 1) * 4, // Right-Center
+    ];
+
+    const bgColors: Array<[number, number, number]> = [];
+    samplePoints.forEach((idx) => {
+      if (idx < origData.length - 3) {
+        bgColors.push([origData[idx], origData[idx + 1], origData[idx + 2]]);
+      }
+    });
+
+    const maxDist = 441.67;
+    const tolDist = (tolerancePercent / 100) * maxDist;
+
+    for (let i = 0; i < origData.length; i += 4) {
+      const origR = origData[i];
+      const origG = origData[i + 1];
+      const origB = origData[i + 2];
+      const cutoutA = cutoutData[i + 3];
+
+      // Check minimum distance to any sampled background color
+      let minBgDist = 999;
+      for (const [bgR, bgG, bgB] of bgColors) {
+        const dr = origR - bgR;
+        const dg = origG - bgG;
+        const db = origB - bgB;
+        const dist = Math.sqrt(dr * dr + dg * dg + db * db);
+        if (dist < minBgDist) minBgDist = dist;
+      }
+
+      const isBgColor = minBgDist <= tolDist;
+
+      if (!isBgColor) {
+        // Pixel is distinctly DIFFERENT from the background (part of subject: hair, skin, dress, halo)
+        // If AI mistakenly made it translucent or cut holes, restore it to 100% solid opacity!
+        if (cutoutA > 0 || minBgDist > tolDist * 1.5) {
+          cutoutData[i] = origR;
+          cutoutData[i + 1] = origG;
+          cutoutData[i + 2] = origB;
+          cutoutData[i + 3] = 255;
+        }
+      } else {
+        // Pixel matches background color within 5% tolerance
+        // If AI left slight translucent artifacts on the background, clean it to 0 opacity
+        if (cutoutA < 220) {
+          cutoutData[i + 3] = 0;
+        }
+      }
+    }
+
+    ctx.putImageData(cutoutImgData, 0, 0);
+
+    const dataUrl = cutoutCanvas.toDataURL('image/png');
+    cutoutCanvas.toBlob((blob) => {
+      resolve({ blob: blob!, dataUrl });
+    }, 'image/png');
+  });
+}
+
 export default function BackgroundRemoverPage() {
   const [originalUrl, setOriginalUrl] = useState<string>('');
   const [resultUrl, setResultUrl] = useState<string>('');
@@ -371,6 +460,50 @@ export default function BackgroundRemoverPage() {
       };
       origImg.src = previewUrl;
 
+      const handleRefinedResult = (rawBlob: Blob, rawUrl: string) => {
+        const rawImg = new Image();
+        rawImg.onload = async () => {
+          let finalBlob = rawBlob;
+          let finalUrl = rawUrl;
+
+          const sourceImg = sourceImageRef.current || origImg;
+          if (sourceImg && sourceImg.naturalWidth > 0) {
+            const tempCanvas = document.createElement('canvas');
+            tempCanvas.width = rawImg.naturalWidth;
+            tempCanvas.height = rawImg.naturalHeight;
+            const tempCtx = tempCanvas.getContext('2d')!;
+            tempCtx.drawImage(rawImg, 0, 0);
+
+            const refined = await refineCutoutAlpha(tempCanvas, sourceImg, magicTolerance);
+            finalBlob = refined.blob;
+            finalUrl = refined.dataUrl;
+          }
+
+          setResultUrl(finalUrl);
+          setResultBlob(finalBlob);
+
+          const refinedImg = new Image();
+          refinedImg.onload = () => {
+            resultImageRef.current = refinedImg;
+            if (editorCanvasRef.current) {
+              const canvas = editorCanvasRef.current;
+              canvas.width = refinedImg.naturalWidth;
+              canvas.height = refinedImg.naturalHeight;
+              const ctx = canvas.getContext('2d')!;
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.drawImage(refinedImg, 0, 0);
+              pushHistory(canvas);
+            }
+          };
+          refinedImg.src = finalUrl;
+
+          setProgressPercent(100);
+          setStatusText('');
+          setLoading(false);
+        };
+        rawImg.src = rawUrl;
+      };
+
       // 1. If user chose Cloud / Custom Inference Server
       if (engineMode === 'cloud' && (withoutBgKey || withoutBgEndpoint)) {
         setStatusText('Processing via withoutBG Server...');
@@ -394,11 +527,7 @@ export default function BackgroundRemoverPage() {
           if (response.ok) {
             const blob = await response.blob();
             const url = URL.createObjectURL(blob);
-            setResultUrl(url);
-            setResultBlob(blob);
-            setProgressPercent(100);
-            setStatusText('');
-            setLoading(false);
+            handleRefinedResult(blob, url);
             return;
           } else {
             console.warn('withoutBG Server returned error, falling back to Open-Weights In-Browser');
@@ -455,26 +584,7 @@ export default function BackgroundRemoverPage() {
         }
 
         const url = URL.createObjectURL(blob);
-        setResultUrl(url);
-        setResultBlob(blob);
-
-        const resImg = new Image();
-        resImg.onload = () => {
-          resultImageRef.current = resImg;
-          if (editorCanvasRef.current) {
-            const canvas = editorCanvasRef.current;
-            canvas.width = resImg.naturalWidth;
-            canvas.height = resImg.naturalHeight;
-            const ctx = canvas.getContext('2d')!;
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(resImg, 0, 0);
-            pushHistory(canvas);
-          }
-        };
-        resImg.src = url;
-
-        setProgressPercent(100);
-        setStatusText('');
+        handleRefinedResult(blob, url);
       } catch (err: unknown) {
         console.error('AI removal failed:', err);
         setErrorMessage(
@@ -482,11 +592,10 @@ export default function BackgroundRemoverPage() {
             ? `AI Error: ${err.message}. Please try another image.`
             : 'Failed to remove background. Please try again.'
         );
-      } finally {
         setLoading(false);
       }
     },
-    [engineMode, withoutBgKey, withoutBgEndpoint]
+    [engineMode, withoutBgKey, withoutBgEndpoint, magicTolerance]
   );
 
   // Setup Editor canvas when switching to editor mode
