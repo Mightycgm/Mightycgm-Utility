@@ -195,7 +195,7 @@ export default function BackgroundRemoverPage() {
   const [activeTool, setActiveTool] = useState<EditorTool>('erase');
   const [brushSize, setBrushSize] = useState<number>(35);
   const [brushSoftness, setBrushSoftness] = useState<number>(20);
-  const [magicTolerance, setMagicTolerance] = useState<number>(10);
+  const [magicTolerance, setMagicTolerance] = useState<number>(5);
   const [showGhostOverlay, setShowGhostOverlay] = useState<boolean>(true);
   const [ghostOpacity, setGhostOpacity] = useState<number>(35);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
