@@ -20,7 +20,7 @@ const toolCategories = [
   {
     category: 'PDF Tools',
     tools: [
-      { name: 'PDF Tools', description: 'Merge, split, PDF↔Images', href: '/pdf-tools', emoji: '📄' },
+      { name: 'PDF Tools', description: 'PDF to Markdown (.md), Merge, Split, PDF↔Images', href: '/pdf-tools', emoji: '📄' },
     ],
   },
   {
